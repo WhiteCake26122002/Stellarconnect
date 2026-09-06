@@ -7,6 +7,9 @@ venv/
 # Generated exports (created at runtime via tempfile; never committed)
 output/
 
+# Paper-trading SQLite database (runtime state, resets on every deploy anyway)
+backend/trading/trading.db
+
 # Local tooling / editor
 .claude/
 .vscode/

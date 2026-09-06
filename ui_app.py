@@ -38,6 +38,14 @@ from ui_forms import build_wacc_inputs_for_company, render_custom_company_form, 
 st.set_page_config(page_title="DCF Valuation Platform", layout="wide", page_icon="📈")
 ui_theme.inject_css()
 
+st.sidebar.title("Mode")
+app_mode = st.sidebar.radio("Choose a tool", ["DCF Valuation", "📈 Paper Trading"], index=0, key="app_mode")
+if app_mode.startswith("📈"):
+    import ui_trading
+
+    ui_trading.render()
+    st.stop()
+
 SOURCE_COLORS = {
     AssumptionSource.HISTORICAL_ACTUAL: "#DBEAFE",
     AssumptionSource.COMPANY_GUIDANCE: "#DCFCE7",
