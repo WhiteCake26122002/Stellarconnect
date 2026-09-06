@@ -17,13 +17,12 @@ or misaligned.
 """
 from __future__ import annotations
 
-import uuid
-
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 from streamlit_autorefresh import st_autorefresh
 
+import ui_common
 import ui_theme
 from backend.trading import store
 from backend.trading.models import STARTING_CASH
@@ -53,38 +52,6 @@ TICKER_DOMAINS = {
     "MSFT": "microsoft.com",
     "TSLA": "tesla.com",
 }
-
-
-def _identity() -> tuple[str | None, str | None]:
-    """
-    Resolves who's using the app right now, in priority order:
-    1. Streamlit Cloud's authenticated viewer email. A real login, so it persists across visits
-       automatically with no extra code.
-    2. A `uid` already sitting in the page's URL (?uid=...), pointing at an existing local account.
-       This is what survives closing the browser: the URL itself is the "remember me" token, no
-       cookie or extra package needed. Set once on account creation/resume (see _landing_page).
-    3. Nothing yet. The caller shows the landing page's create/resume flow.
-    """
-    user = st.user
-    if getattr(user, "is_logged_in", False) and getattr(user, "email", None):
-        name = getattr(user, "name", None) or user.email.split("@")[0]
-        return user.email, name
-
-    uid = st.query_params.get("uid")
-    if uid:
-        account = store.get_user(f"guest:{uid}")
-        if account:
-            return account.user_key, account.display_name
-    return None, None
-
-
-def _initials(name: str) -> str:
-    parts = [p for p in name.strip().split() if p]
-    if not parts:
-        return "?"
-    if len(parts) == 1:
-        return parts[0][:2].upper()
-    return (parts[0][0] + parts[-1][0]).upper()
 
 
 def _fmt_change(change: float, change_pct: float) -> str:
@@ -283,40 +250,9 @@ def _landing_page() -> None:
     t3.caption("Portfolios are private to your account.")
 
     st.divider()
-    user_key, display_name = _identity()
     _, mid, _ = st.columns([1, 1.4, 1])
     with mid:
-        if user_key is None:
-            new_tab, resume_tab = st.tabs(["New account", "Resume with Account ID"])
-            with new_tab:
-                st.text_input("Choose a display name", key="pt_guest_name_input", placeholder="e.g. Rahul")
-                st.caption("You will get a unique Account ID to bookmark or save, so closing the browser does not lose your portfolio.")
-                if st.button("Create Account & Enter", use_container_width=True, type="primary"):
-                    name = st.session_state.get("pt_guest_name_input", "").strip()
-                    if not name:
-                        st.error("Enter a display name first.")
-                    else:
-                        uid = uuid.uuid4().hex[:8]
-                        store.get_or_create_user(f"guest:{uid}", name)
-                        st.query_params["uid"] = uid
-                        st.session_state["pt_entered"] = True
-                        st.rerun()
-            with resume_tab:
-                st.text_input("Your Account ID", key="pt_resume_uid_input", placeholder="e.g. a1b2c3d4")
-                if st.button("Resume My Portfolio", use_container_width=True):
-                    uid = st.session_state.get("pt_resume_uid_input", "").strip().lower()
-                    account = store.get_user(f"guest:{uid}") if uid else None
-                    if account is None:
-                        st.error("No account found with that ID. Double-check it, or create a new account instead.")
-                    else:
-                        st.query_params["uid"] = uid
-                        st.session_state["pt_entered"] = True
-                        st.rerun()
-        else:
-            st.caption(f"Welcome back, {display_name}.")
-            if st.button("Enter Trading Floor", use_container_width=True, type="primary"):
-                st.session_state["pt_entered"] = True
-                st.rerun()
+        ui_common.render_entry_gate()
 
 
 # ------------------------------------------------------------ Trading floor --
@@ -347,7 +283,7 @@ def _top_navbar(display_name: str) -> None:
             <div class="pt-navbar-row">
                 <div class="pt-navbar-left">{_pill("NIFTY", quotes.get(NIFTY_TICKER))}{_pill("SENSEX", quotes.get(SENSEX_TICKER))}{fx_pill}</div>
                 <div class="pt-navbar-brand">Paper Trading</div>
-                <div class="pt-avatar">{_initials(display_name)}</div>
+                <div class="pt-avatar">{ui_common.initials(display_name)}</div>
             </div>
             <div class="pt-navbar-sectors">{sector_pills}</div>
         </div>
@@ -551,12 +487,12 @@ def _leaderboard(current_user_key: str) -> None:
 def _dashboard() -> None:
     st_autorefresh(interval=AUTOREFRESH_MS, key="pt_autorefresh")
 
-    user_key, display_name = _identity()
+    user_key, display_name = ui_common.resolve_identity()
     if user_key is None:
         # The account this browser was pointing at (via ?uid=... or a stale session) no longer
         # resolves to a real row - e.g. the backing store was reset. Bounce back to the landing
         # page instead of crashing on a null display_name.
-        st.session_state["pt_entered"] = False
+        st.session_state[ui_common.ACCOUNT_SESSION_KEY] = False
         st.query_params.pop("uid", None)
         st.rerun()
     user = store.get_or_create_user(user_key, display_name)
@@ -574,7 +510,7 @@ def _dashboard() -> None:
     _watchlist_sidebar()
     st.sidebar.divider()
     if st.sidebar.button("Back to Landing", use_container_width=True):
-        st.session_state["pt_entered"] = False
+        st.session_state[ui_common.ACCOUNT_SESSION_KEY] = False
         st.rerun()
 
     holdings_for_summary = store.get_holdings(user_key)
@@ -612,7 +548,7 @@ def _dashboard() -> None:
 def render() -> None:
     store.init_db()
     _css()
-    if st.session_state.get("pt_entered"):
+    if st.session_state.get(ui_common.ACCOUNT_SESSION_KEY):
         _dashboard()
     else:
         _landing_page()
