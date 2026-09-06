@@ -240,7 +240,7 @@ def _sparkline_preview() -> None:
 
 
 def _landing_page() -> None:
-    st.markdown('<div class="pt-eyebrow">Paper Trading. Invite-only.</div>', unsafe_allow_html=True)
+    st.markdown('<div class="pt-eyebrow">Paper Trading. Share the link to invite others.</div>', unsafe_allow_html=True)
     st.markdown('<div class="pt-h1">Trade real stocks. Zero real risk.</div>', unsafe_allow_html=True)
     st.markdown(
         '<div class="pt-sub">Build a portfolio of real, live-quoted stocks against a simulated bankroll. '
@@ -261,7 +261,7 @@ def _landing_page() -> None:
     cards = [
         (c1, "Live Market Data", "Prices stream from the same Yahoo Finance feed powering the DCF engine, refreshed on a live cycle."),
         (c2, "No Real-Money Channel", "There is no card, bank, or crypto link anywhere in this app. Simulated cash cannot become real cash."),
-        (c3, "Invite-Only Access", "Only viewers you have explicitly granted access to this app can see it or open an account."),
+        (c3, "Shareable Access", "Anyone with the app link can open it and create their own account. No sign-up or approval needed."),
         (c4, "Realistic Execution", "Orders fill at the live quote at the moment you submit them, using the same cost basis and P&L math a real broker uses."),
     ]
     for col, title, desc in cards:
