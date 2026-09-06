@@ -12,6 +12,7 @@ from dataclasses import dataclass
 CONCENTRATION_THRESHOLD_PCT = 40.0
 CATEGORY_OVERLAP_MIN_COUNT = 3
 UNDERPERFORMER_GAP_PCT = 5.0
+AMC_CONCENTRATION_THRESHOLD_PCT = 50.0
 
 
 @dataclass
@@ -44,6 +45,20 @@ def build_flags(enriched_holdings: list[dict]) -> list[Flag]:
                 flags.append(Flag(
                     "warning", f"{h['scheme_name']} is {weight:.0f}% of your portfolio",
                     "A single holding this large means your portfolio's performance is mostly tied to one fund's fortunes.",
+                ))
+
+    if total_value > 0 and len(available) >= 2:
+        by_amc: dict[str, list[dict]] = {}
+        for h in available:
+            amc = h.get("fund_house")
+            if amc:
+                by_amc.setdefault(amc, []).append(h)
+        for amc, group in by_amc.items():
+            weight = sum(h["value"] for h in group) / total_value * 100
+            if weight >= AMC_CONCENTRATION_THRESHOLD_PCT:
+                flags.append(Flag(
+                    "info", f"{weight:.0f}% of your portfolio is with {amc}",
+                    "Spreading across fund houses reduces exposure to any one AMC's investment style or key-person risk.",
                 ))
 
     for h in available:

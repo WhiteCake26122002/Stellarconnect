@@ -77,6 +77,30 @@ def test_underperformer_flag_against_same_category_peers():
     assert not any("Fund A" in f.title and "lags" in f.title for f in flags)
 
 
+def test_amc_concentration_flag_when_one_fund_house_dominates():
+    holdings = [
+        _holding("Fund A", "Equity - Large Cap", 6000, 10.0),
+        _holding("Fund B", "Debt - Liquid", 4000, 5.0),
+    ]
+    holdings[0]["fund_house"] = "HDFC Mutual Fund"
+    holdings[1]["fund_house"] = "HDFC Mutual Fund"
+    flags = build_flags(holdings)
+    assert any("100%" in f.title and "HDFC Mutual Fund" in f.title for f in flags)
+
+
+def test_no_amc_concentration_flag_when_spread_across_fund_houses():
+    holdings = [
+        _holding("Fund A", "Equity - Large Cap", 4000, 10.0),
+        _holding("Fund B", "Debt - Liquid", 3000, 5.0),
+        _holding("Fund C", "Hybrid - Balanced Advantage", 3000, 8.0),
+    ]
+    holdings[0]["fund_house"] = "HDFC Mutual Fund"
+    holdings[1]["fund_house"] = "SBI Mutual Fund"
+    holdings[2]["fund_house"] = "ICICI Prudential Mutual Fund"
+    flags = build_flags(holdings)
+    assert not any("your portfolio is with" in f.title for f in flags)
+
+
 def test_missing_data_flag_for_unavailable_scheme():
     holdings = [
         _holding("Fund A", "Equity - Large Cap", 5000, 12.0),

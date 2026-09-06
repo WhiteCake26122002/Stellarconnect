@@ -13,23 +13,26 @@ advisor.
 """
 from __future__ import annotations
 
+import datetime as dt
+
 import pandas as pd
 import streamlit as st
 
 import ui_common
-from backend.mutual_funds import nav, recommend, store
+from backend.mutual_funds import analysis, nav, recommend, store
 
 
 def _enrich(holdings: list) -> list[dict]:
     enriched = []
     for h in holdings:
+        purchase_date = dt.date.fromisoformat(h.purchase_date)
         detail = nav.get_scheme_detail(h.scheme_code)
         if detail is None:
             enriched.append({
                 "scheme_code": h.scheme_code, "scheme_name": h.scheme_name, "scheme_category": "Unknown",
-                "units": h.units, "avg_nav": h.avg_nav, "current_nav": None, "value": 0.0,
-                "invested": h.units * h.avg_nav, "gain": None, "gain_pct": None,
-                "return_1y": None, "data_available": False,
+                "fund_house": "Unknown", "units": h.units, "avg_nav": h.avg_nav, "current_nav": None,
+                "value": 0.0, "invested": h.units * h.avg_nav, "purchase_date": purchase_date,
+                "gain": None, "gain_pct": None, "return_1y": None, "data_available": False,
             })
             continue
         _, current_nav = nav.latest_nav(detail)
@@ -37,9 +40,9 @@ def _enrich(holdings: list) -> list[dict]:
         value = h.units * current_nav
         enriched.append({
             "scheme_code": h.scheme_code, "scheme_name": h.scheme_name,
-            "scheme_category": detail["scheme_category"],
+            "scheme_category": detail["scheme_category"], "fund_house": detail["fund_house"],
             "units": h.units, "avg_nav": h.avg_nav, "current_nav": current_nav, "value": value,
-            "invested": invested, "gain": value - invested,
+            "invested": invested, "purchase_date": purchase_date, "gain": value - invested,
             "gain_pct": (value / invested - 1) * 100 if invested else None,
             "return_1y": nav.trailing_return_pct(detail, 365),
             "data_available": True,
@@ -70,8 +73,14 @@ def _add_fund_section(user_key: str) -> None:
     units = c1.number_input("Units", min_value=0.0, step=1.0, key="mf_units_input")
     nav_mode = c2.radio("Purchase NAV", ["Use latest NAV", "Enter manually"], key="mf_nav_mode")
     manual_nav = None
+    purchase_date = dt.date.today()
     if nav_mode == "Enter manually":
-        manual_nav = st.number_input("Your purchase NAV", min_value=0.0, step=0.01, key="mf_manual_nav_input")
+        c3, c4 = st.columns(2)
+        manual_nav = c3.number_input("Your purchase NAV", min_value=0.0, step=0.01, key="mf_manual_nav_input")
+        purchase_date = c4.date_input(
+            "When did you buy this?", value=dt.date.today(), max_value=dt.date.today(), key="mf_purchase_date_input",
+        )
+        st.caption("Set the actual purchase date for an existing holding so returns (XIRR) are calculated correctly.")
 
     if st.button("Add to Portfolio", type="primary", key="mf_add_button"):
         detail = nav.get_scheme_detail(selected["code"])
@@ -83,7 +92,7 @@ def _add_fund_section(user_key: str) -> None:
         else:
             purchase_nav = manual_nav
         try:
-            store.add_holding(user_key, selected["code"], selected["name"], units, purchase_nav)
+            store.add_holding(user_key, selected["code"], selected["name"], units, purchase_nav, purchase_date.isoformat())
             st.success(f"Added {units:g} units of {selected['name']}.")
             st.rerun()
         except store.MFError as e:
@@ -155,6 +164,133 @@ def _insights_tab(enriched: list[dict]) -> None:
             st.info(body)
 
 
+def _render_breakdown(allocation: dict[str, float]) -> None:
+    if not allocation:
+        st.caption("Not enough data to compute this yet.")
+        return
+    series = pd.Series(allocation).sort_values(ascending=False)
+    st.bar_chart(series)
+    cols = st.columns(min(len(series), 4))
+    for i, (label, pct) in enumerate(series.items()):
+        cols[i % len(cols)].caption(f"{label}: {pct:.1f}%")
+
+
+def _analysis_tab(enriched: list[dict]) -> None:
+    available = [h for h in enriched if h["data_available"]]
+    if not available:
+        st.info("Add a fund to your portfolio to see analysis here.")
+        return
+
+    st.caption(
+        "Money-weighted (XIRR) returns compared against the NIFTY 500, plus how your portfolio "
+        "splits by asset class, market cap and fund house."
+    )
+
+    today = dt.date.today()
+    benchmark_history = nav.get_benchmark_history()
+
+    portfolio_flows = [(h["purchase_date"], -h["invested"]) for h in available]
+    portfolio_flows.append((today, sum(h["value"] for h in available)))
+    portfolio_xirr = analysis.xirr(portfolio_flows)
+
+    benchmark_total = 0.0
+    benchmark_ok = bool(benchmark_history)
+    for h in available:
+        bev = analysis.benchmark_equivalent_value(h["invested"], h["purchase_date"], today, benchmark_history)
+        if bev is None:
+            benchmark_ok = False
+            break
+        benchmark_total += bev
+    benchmark_xirr = None
+    if benchmark_ok:
+        benchmark_flows = [(h["purchase_date"], -h["invested"]) for h in available] + [(today, benchmark_total)]
+        benchmark_xirr = analysis.xirr(benchmark_flows)
+
+    st.markdown("**Portfolio XIRR vs NIFTY 500**")
+    if portfolio_xirr is None:
+        st.info("Not enough history yet to compute an annualized return (e.g. everything was bought today).")
+    else:
+        c1, c2 = st.columns(2)
+        c1.metric("Your Portfolio XIRR", f"{portfolio_xirr:+.2f}%")
+        if benchmark_xirr is not None:
+            c2.metric("Benchmark XIRR (NIFTY 500)", f"{benchmark_xirr:+.2f}%")
+            if portfolio_xirr > benchmark_xirr:
+                st.success(f"Outperforming NIFTY 500 by {portfolio_xirr - benchmark_xirr:.2f} percentage points.")
+            else:
+                st.warning(f"Trailing NIFTY 500 by {benchmark_xirr - portfolio_xirr:.2f} percentage points.")
+        else:
+            c2.metric("Benchmark XIRR (NIFTY 500)", "n/a")
+
+    st.write("")
+    st.markdown("**Fund Performance**")
+    fund_rows = []
+    for h in available:
+        own = analysis.xirr([(h["purchase_date"], -h["invested"]), (today, h["value"])])
+        bev = (
+            analysis.benchmark_equivalent_value(h["invested"], h["purchase_date"], today, benchmark_history)
+            if benchmark_history else None
+        )
+        bench = analysis.xirr([(h["purchase_date"], -h["invested"]), (today, bev)]) if bev is not None else None
+        fund_rows.append({"name": h["scheme_name"], "own": own, "bench": bench})
+
+    comparable = [r for r in fund_rows if r["own"] is not None and r["bench"] is not None]
+    if comparable:
+        outperforming = [r for r in comparable if r["own"] > r["bench"]]
+        st.caption(f"{len(outperforming)}/{len(comparable)} funds outperforming their NIFTY 500-equivalent period.")
+        for r in comparable:
+            with st.container(border=True):
+                label = "outperforming benchmark" if r["own"] > r["bench"] else "trailing benchmark"
+                st.markdown(f"**{r['name']}** ({label})")
+                cc1, cc2 = st.columns(2)
+                cc1.metric("Your XIRR", f"{r['own']:+.2f}%")
+                cc2.metric("Benchmark XIRR", f"{r['bench']:+.2f}%")
+    else:
+        st.caption("Not enough purchase history yet to compare individual funds against the benchmark.")
+
+    st.divider()
+
+    rows = [{"scheme_category": h["scheme_category"], "value": h["value"]} for h in available]
+    asset_alloc = analysis.weighted_breakdown(rows, analysis.classify_asset_class)
+    st.markdown("**Asset Allocation**")
+    _render_breakdown(asset_alloc)
+    if asset_alloc:
+        top_label, top_pct = max(asset_alloc.items(), key=lambda kv: kv[1])
+        if top_pct >= 80:
+            st.warning(
+                f"Most of your investment is in {top_label} ({top_pct:.0f}%). "
+                "Consider whether that concentration matches your risk appetite."
+            )
+
+    st.write("")
+    equity_rows = [
+        {"scheme_category": h["scheme_category"], "value": h["value"]}
+        for h in available if analysis.classify_asset_class(h["scheme_category"]) == "Equity"
+    ]
+    if equity_rows:
+        cap_alloc = analysis.weighted_breakdown(equity_rows, analysis.classify_market_cap)
+        st.markdown("**Equity Market Cap Split**")
+        _render_breakdown(cap_alloc)
+        if cap_alloc:
+            top_label, top_pct = max(cap_alloc.items(), key=lambda kv: kv[1])
+            if top_pct >= 50:
+                st.warning(f"Your equity holdings are concentrated in {top_label} ({top_pct:.0f}%).")
+
+    st.write("")
+    amc_rows = [{"fund_house": h["fund_house"], "value": h["value"]} for h in available]
+    amc_alloc = analysis.amc_breakdown(amc_rows)
+    st.markdown("**AMC Split**")
+    _render_breakdown(amc_alloc)
+
+    st.divider()
+    st.caption(
+        "Sector-level look-through (Financial, Technology, Healthcare, etc.) isn't shown here: it "
+        "would require knowing exactly which stocks each fund currently holds, and there is no "
+        "free, reliable source for that in India - only paid data providers carry it. The asset "
+        "class and market cap splits above are based on each fund's official AMFI category, not a "
+        "live look-through of its actual holdings."
+    )
+
+
 def _dashboard() -> None:
     user_key, display_name = ui_common.resolve_identity()
     if user_key is None:
@@ -178,11 +314,13 @@ def _dashboard() -> None:
     holdings = store.get_holdings(user_key)
     enriched = _enrich(holdings)
 
-    tab_portfolio, tab_insights = st.tabs(["Portfolio", "Insights"])
+    tab_portfolio, tab_insights, tab_analysis = st.tabs(["Portfolio", "Insights", "Analysis"])
     with tab_portfolio:
         _portfolio_tab(user_key, enriched)
     with tab_insights:
         _insights_tab(enriched)
+    with tab_analysis:
+        _analysis_tab(enriched)
 
 
 def _landing_page() -> None:

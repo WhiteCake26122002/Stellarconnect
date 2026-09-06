@@ -17,11 +17,18 @@ import datetime as dt
 
 import requests
 import streamlit as st
+import yfinance as yf
 
 MFAPI_BASE = "https://api.mfapi.in/mf"
 SCHEME_LIST_TTL_SECONDS = 24 * 3600
 SCHEME_DETAIL_TTL_SECONDS = 6 * 3600
 REQUEST_TIMEOUT_SECONDS = 15
+
+# NIFTY 500 - the benchmark index used for the "what if you'd invested in the index instead"
+# XIRR comparison. Broader than NIFTY 50, and the same benchmark most Indian portfolio trackers
+# compare an actively-managed equity portfolio against.
+BENCHMARK_TICKER = "^CRSLDX"
+BENCHMARK_TTL_SECONDS = 6 * 3600
 
 
 @st.cache_data(ttl=SCHEME_LIST_TTL_SECONDS, show_spinner=False)
@@ -77,6 +84,19 @@ def get_scheme_detail(scheme_code: int) -> dict | None:
         }
     except Exception:
         return None
+
+
+@st.cache_data(ttl=BENCHMARK_TTL_SECONDS, show_spinner=False)
+def get_benchmark_history() -> list[tuple[dt.date, float]]:
+    """Daily NIFTY 500 closing levels over the last 10 years, sorted oldest-first. Empty list on
+    failure - callers should treat that as "benchmark comparison unavailable", not crash."""
+    try:
+        hist = yf.Ticker(BENCHMARK_TICKER).history(period="10y", interval="1d")
+        if hist.empty:
+            return []
+        return [(idx.date(), float(close)) for idx, close in hist["Close"].items()]
+    except Exception:
+        return []
 
 
 def latest_nav(detail: dict) -> tuple[dt.date, float]:
