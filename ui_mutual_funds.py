@@ -47,54 +47,58 @@ def _enrich(holdings: list) -> list[dict]:
     return enriched
 
 
-def _add_fund_form(user_key: str) -> None:
-    st.sidebar.title("Add a Fund")
+def _add_fund_section(user_key: str) -> None:
     all_schemes = nav.get_all_schemes()
     if not all_schemes:
-        st.sidebar.warning("Could not reach the NAV data source right now. Try again shortly.")
+        st.warning("Could not reach the NAV data source right now. Try again shortly.")
         return
-    st.sidebar.caption(f"{len(all_schemes):,} AMFI schemes available to search.")
+    st.caption(f"Search across all {len(all_schemes):,} AMFI schemes.")
 
-    query = st.sidebar.text_input("Search scheme name", placeholder="e.g. HDFC Flexi Cap", key="mf_search_input")
+    query = st.text_input("Search scheme name", placeholder="e.g. HDFC Flexi Cap", key="mf_search_input")
     if not query.strip():
         return
     matches = nav.search_schemes(query, all_schemes, limit=15)
     if not matches:
-        st.sidebar.info("No matching schemes.")
+        st.info("No matching schemes.")
         return
 
     options = {f"{m['name']} ({m['code']})": m for m in matches}
-    choice = st.sidebar.selectbox("Matching schemes", list(options.keys()), key="mf_scheme_choice")
+    choice = st.selectbox("Matching schemes", list(options.keys()), key="mf_scheme_choice")
     selected = options[choice]
 
-    units = st.sidebar.number_input("Units", min_value=0.0, step=1.0, key="mf_units_input")
-    nav_mode = st.sidebar.radio("Purchase NAV", ["Use latest NAV", "Enter manually"], key="mf_nav_mode")
+    c1, c2 = st.columns(2)
+    units = c1.number_input("Units", min_value=0.0, step=1.0, key="mf_units_input")
+    nav_mode = c2.radio("Purchase NAV", ["Use latest NAV", "Enter manually"], key="mf_nav_mode")
     manual_nav = None
     if nav_mode == "Enter manually":
-        manual_nav = st.sidebar.number_input("Your purchase NAV", min_value=0.0, step=0.01, key="mf_manual_nav_input")
+        manual_nav = st.number_input("Your purchase NAV", min_value=0.0, step=0.01, key="mf_manual_nav_input")
 
-    if st.sidebar.button("Add to Portfolio", use_container_width=True, type="primary"):
+    if st.button("Add to Portfolio", type="primary", key="mf_add_button"):
         detail = nav.get_scheme_detail(selected["code"])
         if nav_mode == "Use latest NAV":
             if detail is None:
-                st.sidebar.error("Could not fetch a live NAV for this scheme right now.")
+                st.error("Could not fetch a live NAV for this scheme right now.")
                 return
             _, purchase_nav = nav.latest_nav(detail)
         else:
             purchase_nav = manual_nav
         try:
             store.add_holding(user_key, selected["code"], selected["name"], units, purchase_nav)
-            st.sidebar.success(f"Added {units:g} units of {selected['name']}.")
+            st.success(f"Added {units:g} units of {selected['name']}.")
             st.rerun()
         except store.MFError as e:
-            st.sidebar.error(str(e))
+            st.error(str(e))
 
 
 def _portfolio_tab(user_key: str, enriched: list[dict]) -> None:
+    with st.expander("Add a Fund", expanded=not enriched):
+        _add_fund_section(user_key)
+
     if not enriched:
-        st.info("No mutual funds tracked yet. Search for one in the sidebar to add your first holding.")
+        st.info("No mutual funds tracked yet. Use \"Add a Fund\" above to add your first holding.")
         return
 
+    st.write("")
     total_invested = sum(h["invested"] for h in enriched)
     total_value = sum(h["value"] for h in enriched)
     total_gain = total_value - total_invested
@@ -167,8 +171,6 @@ def _dashboard() -> None:
         uid = user_key.removeprefix("guest:")
         st.query_params["uid"] = uid
 
-    _add_fund_form(user_key)
-    st.sidebar.divider()
     if st.sidebar.button("Back to Landing", use_container_width=True, key="mf_back_to_landing"):
         st.session_state[ui_common.ACCOUNT_SESSION_KEY] = False
         st.rerun()
