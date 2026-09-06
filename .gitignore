@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.pyc
+venv/
+.pytest_cache/
+
+# Generated exports (created at runtime via tempfile; never committed)
+output/
+
+# Local tooling / editor
+.claude/
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Secrets - never commit Streamlit secrets
+.streamlit/secrets.toml
