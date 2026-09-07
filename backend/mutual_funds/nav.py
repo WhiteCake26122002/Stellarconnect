@@ -24,11 +24,15 @@ SCHEME_LIST_TTL_SECONDS = 24 * 3600
 SCHEME_DETAIL_TTL_SECONDS = 6 * 3600
 REQUEST_TIMEOUT_SECONDS = 15
 
-# NIFTY 500 - the benchmark index used for the "what if you'd invested in the index instead"
-# XIRR comparison. Broader than NIFTY 50, and the same benchmark most Indian portfolio trackers
-# compare an actively-managed equity portfolio against.
-BENCHMARK_TICKER = "^CRSLDX"
-BENCHMARK_TTL_SECONDS = 6 * 3600
+# Benchmarks for the "what if you'd invested in the index instead" XIRR comparison. NIFTY 50 is
+# the most commonly quoted "the market" reference; NIFTY 500 is broader and the one most Indian
+# portfolio trackers compare an actively-managed equity portfolio against - showing both lets a
+# user see whichever framing they care about.
+BENCHMARK_INDICES: dict[str, str] = {
+    "NIFTY 50": "^NSEI",
+    "NIFTY 500": "^CRSLDX",
+}
+INDEX_HISTORY_TTL_SECONDS = 6 * 3600
 
 
 @st.cache_data(ttl=SCHEME_LIST_TTL_SECONDS, show_spinner=False)
@@ -86,12 +90,12 @@ def get_scheme_detail(scheme_code: int) -> dict | None:
         return None
 
 
-@st.cache_data(ttl=BENCHMARK_TTL_SECONDS, show_spinner=False)
-def get_benchmark_history() -> list[tuple[dt.date, float]]:
-    """Daily NIFTY 500 closing levels over the last 10 years, sorted oldest-first. Empty list on
-    failure - callers should treat that as "benchmark comparison unavailable", not crash."""
+@st.cache_data(ttl=INDEX_HISTORY_TTL_SECONDS, show_spinner=False)
+def get_index_history(ticker: str) -> list[tuple[dt.date, float]]:
+    """Daily closing levels for `ticker` over the last 10 years, sorted oldest-first. Empty list
+    on failure - callers should treat that as "benchmark comparison unavailable", not crash."""
     try:
-        hist = yf.Ticker(BENCHMARK_TICKER).history(period="10y", interval="1d")
+        hist = yf.Ticker(ticker).history(period="10y", interval="1d")
         if hist.empty:
             return []
         return [(idx.date(), float(close)) for idx, close in hist["Close"].items()]

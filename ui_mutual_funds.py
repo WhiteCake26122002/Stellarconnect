@@ -228,47 +228,46 @@ def _analysis_tab(enriched: list[dict]) -> None:
         return
 
     st.caption(
-        "Money-weighted (XIRR) returns compared against the NIFTY 500, plus how your portfolio "
-        "splits by asset class, market cap and fund house."
+        "Money-weighted (XIRR) returns compared against NIFTY 50 and NIFTY 500, plus how your "
+        "portfolio splits by asset class, market cap and fund house."
     )
 
     today = dt.date.today()
-    benchmark_history = nav.get_benchmark_history()
+    benchmark_histories = {label: nav.get_index_history(ticker) for label, ticker in nav.BENCHMARK_INDICES.items()}
 
     portfolio_flows = [(h["purchase_date"], -h["invested"]) for h in available]
     portfolio_flows.append((today, sum(h["value"] for h in available)))
     portfolio_xirr = analysis.xirr(portfolio_flows)
 
-    benchmark_total = 0.0
-    benchmark_ok = bool(benchmark_history)
-    for h in available:
-        bev = analysis.benchmark_equivalent_value(h["invested"], h["purchase_date"], today, benchmark_history)
-        if bev is None:
-            benchmark_ok = False
-            break
-        benchmark_total += bev
-    benchmark_xirr = None
-    if benchmark_ok:
-        benchmark_flows = [(h["purchase_date"], -h["invested"]) for h in available] + [(today, benchmark_total)]
-        benchmark_xirr = analysis.xirr(benchmark_flows)
+    def _benchmark_xirr(history: list[tuple[dt.date, float]]) -> float | None:
+        total = 0.0
+        for h in available:
+            bev = analysis.benchmark_equivalent_value(h["invested"], h["purchase_date"], today, history)
+            if bev is None:
+                return None
+            total += bev
+        flows = [(h["purchase_date"], -h["invested"]) for h in available] + [(today, total)]
+        return analysis.xirr(flows)
 
-    st.markdown("**Portfolio XIRR vs NIFTY 500**")
+    benchmark_returns = {label: _benchmark_xirr(hist) for label, hist in benchmark_histories.items()}
+
+    st.markdown("**Portfolio XIRR vs Benchmarks**")
     if portfolio_xirr is None:
         st.info("Not enough history yet to compute an annualized return (e.g. everything was bought today).")
     else:
-        c1, c2 = st.columns(2)
-        c1.metric("Your Portfolio XIRR", f"{portfolio_xirr:+.2f}%")
-        if benchmark_xirr is not None:
-            c2.metric("Benchmark XIRR (NIFTY 500)", f"{benchmark_xirr:+.2f}%")
-            if portfolio_xirr > benchmark_xirr:
-                st.success(f"Outperforming NIFTY 500 by {portfolio_xirr - benchmark_xirr:.2f} percentage points.")
-            else:
-                st.warning(f"Trailing NIFTY 500 by {benchmark_xirr - portfolio_xirr:.2f} percentage points.")
-        else:
-            c2.metric("Benchmark XIRR (NIFTY 500)", "n/a")
+        cols = st.columns(len(nav.BENCHMARK_INDICES) + 1)
+        cols[0].metric("Your Portfolio", f"{portfolio_xirr:+.2f}%")
+        for col, (label, bench_xirr) in zip(cols[1:], benchmark_returns.items()):
+            col.metric(label, f"{bench_xirr:+.2f}%" if bench_xirr is not None else "n/a")
+
+        comparable = {label: r for label, r in benchmark_returns.items() if r is not None}
+        if comparable:
+            beaten = [label for label, r in comparable.items() if portfolio_xirr > r]
+            st.caption(f"Outperforming {len(beaten)}/{len(comparable)} benchmarks shown above.")
 
     st.write("")
-    st.markdown("**Fund Performance**")
+    st.markdown("**Fund Performance (vs NIFTY 500)**")
+    benchmark_history = benchmark_histories.get("NIFTY 500", [])
     fund_rows = []
     for h in available:
         own = analysis.xirr([(h["purchase_date"], -h["invested"]), (today, h["value"])])
