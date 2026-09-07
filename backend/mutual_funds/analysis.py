@@ -15,61 +15,12 @@ Two honesty notes baked into the design:
 """
 from __future__ import annotations
 
-import datetime as dt
+from ..common.finance import benchmark_equivalent_value, price_on_or_before, xirr
 
-
-def _npv(cash_flows: list[tuple[dt.date, float]], rate: float) -> float:
-    if rate <= -1:
-        return float("inf")
-    t0 = cash_flows[0][0]
-    return sum(cf / (1 + rate) ** ((d - t0).days / 365) for d, cf in cash_flows)
-
-
-def xirr(cash_flows: list[tuple[dt.date, float]]) -> float | None:
-    """
-    Annualized money-weighted return (%) for (date, amount) cash flows - negative for money
-    going in, positive for money coming out or the terminal value. None if it can't be solved:
-    fewer than 2 flows, all flows the same sign, or every flow lands on the same date.
-    """
-    if len(cash_flows) < 2:
-        return None
-    if all(cf >= 0 for _, cf in cash_flows) or all(cf <= 0 for _, cf in cash_flows):
-        return None
-    flows = sorted(cash_flows, key=lambda x: x[0])
-    low, high = -0.9999, 10.0
-    npv_low, npv_high = _npv(flows, low), _npv(flows, high)
-    if npv_low * npv_high > 0:
-        return None
-    mid = low
-    for _ in range(100):
-        mid = (low + high) / 2
-        npv_mid = _npv(flows, mid)
-        if abs(npv_mid) < 1e-6:
-            break
-        if (npv_low < 0) == (npv_mid < 0):
-            low, npv_low = mid, npv_mid
-        else:
-            high, npv_high = mid, npv_mid
-    return mid * 100
-
-
-def price_on_or_before(history: list[tuple[dt.date, float]], target: dt.date) -> float | None:
-    """Most recent price on or before `target` (markets are closed weekends/holidays)."""
-    candidates = [price for date, price in history if date <= target]
-    return candidates[-1] if candidates else None
-
-
-def benchmark_equivalent_value(
-    invested: float, purchase_date: dt.date, today: dt.date, benchmark_history: list[tuple[dt.date, float]]
-) -> float | None:
-    """What `invested` would be worth today if put into the benchmark index on `purchase_date`
-    instead of the actual fund. None if the benchmark has no price on either date."""
-    price_then = price_on_or_before(benchmark_history, purchase_date)
-    price_now = price_on_or_before(benchmark_history, today)
-    if not price_then or not price_now:
-        return None
-    return invested * (price_now / price_then)
-
+__all__ = [
+    "xirr", "price_on_or_before", "benchmark_equivalent_value",
+    "classify_asset_class", "classify_market_cap", "weighted_breakdown", "amc_breakdown",
+]
 
 ASSET_CLASS_KEYWORDS = [
     ("equity", "Equity"),

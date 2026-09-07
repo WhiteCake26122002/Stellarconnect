@@ -17,6 +17,8 @@ or misaligned.
 """
 from __future__ import annotations
 
+import datetime as dt
+
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
@@ -24,9 +26,11 @@ from streamlit_autorefresh import st_autorefresh
 
 import ui_common
 import ui_theme
-from backend.trading import store
+from backend.common.finance import jensens_alpha
+from backend.trading import analysis, store
 from backend.trading.models import STARTING_CASH
 from backend.trading.quotes import (
+    BENCHMARK_INDICES,
     NIFTY_TICKER,
     SECTOR_INDICES,
     SENSEX_TICKER,
@@ -35,6 +39,7 @@ from backend.trading.quotes import (
     get_intraday_history,
     get_live_prices,
     get_live_quotes,
+    get_price_history,
 )
 
 WATCHLIST_PREVIEW = ["RELIANCE.NS", "TCS.NS", "INFY.NS", "AAPL", "MSFT", "TSLA"]
@@ -484,6 +489,113 @@ def _leaderboard(current_user_key: str) -> None:
     st.dataframe(df, use_container_width=True, hide_index=True)
 
 
+def _benchmarks_tab(created_at: dt.date, cash: float, holdings: list, live_prices: dict[str, float]) -> None:
+    today = dt.date.today()
+    net_worth = cash + sum((live_prices.get(h.ticker) or h.avg_cost) * h.quantity for h in holdings)
+    portfolio_return = analysis.account_return_pct(created_at, today, STARTING_CASH, net_worth)
+
+    st.markdown('<div class="pt-section-label">Portfolio vs Benchmarks</div>', unsafe_allow_html=True)
+    st.caption(
+        "Your account's money-weighted (XIRR) return since it was created, compared against what "
+        "the same starting cash would have earned if it had gone into each index instead."
+    )
+
+    if portfolio_return is None:
+        st.info("Not enough history yet to compute an annualized return - check back once your account is at least a day old.")
+        return
+
+    benchmark_histories = {label: get_price_history(ticker) for label, ticker in BENCHMARK_INDICES.items()}
+    benchmark_returns: dict[str, float | None] = {
+        label: analysis.benchmark_return_pct(created_at, today, STARTING_CASH, history)
+        for label, history in benchmark_histories.items()
+    }
+
+    cols = st.columns(len(BENCHMARK_INDICES) + 1)
+    with cols[0]:
+        with st.container(border=True):
+            st.metric("Your Portfolio", f"{portfolio_return:+.2f}%")
+    for col, (label, bench_return) in zip(cols[1:], benchmark_returns.items()):
+        with col:
+            with st.container(border=True):
+                st.metric(label, f"{bench_return:+.2f}%" if bench_return is not None else "n/a")
+
+    comparable = {label: r for label, r in benchmark_returns.items() if r is not None}
+    if comparable:
+        beaten = [label for label, r in comparable.items() if portfolio_return > r]
+        st.caption(f"Outperforming {len(beaten)}/{len(comparable)} benchmarks shown above.")
+
+    st.divider()
+
+    st.markdown('<div class="pt-section-label">Alpha</div>', unsafe_allow_html=True)
+    with st.expander("What is alpha?"):
+        st.write(
+            "Alpha (α) measures an investing strategy's ability to outperform the market - "
+            "its \"edge\". It's the excess return of a portfolio compared to a benchmark index, "
+            "adjusted for risk. A positive alpha means the portfolio beat what its risk level "
+            "would predict; a negative alpha means it fell short.\n\n"
+            "Alpha is calculated alongside beta (β), which measures how sensitive a "
+            "portfolio is to overall market moves - a beta above 1 means it tends to swing more "
+            "than the market, below 1 means less. Together they separate genuine skill from "
+            "returns that simply came from taking on more market risk."
+        )
+
+    ac1, ac2 = st.columns(2)
+    benchmark_label = ac1.selectbox("Benchmark for Beta & Alpha", list(BENCHMARK_INDICES.keys()), key="pt_alpha_benchmark")
+    risk_free_rate = ac2.number_input(
+        "Risk-free rate (%)", min_value=0.0, max_value=15.0, value=7.0, step=0.1, key="pt_alpha_rf_rate",
+    )
+    st.caption(
+        "There's no live Indian government-bond-yield feed wired up here, so enter the current "
+        "10-year G-Sec yield (or your own assumption) directly - the same manual approach the DCF "
+        "tool's own risk-free-rate input uses."
+    )
+
+    benchmark_history = benchmark_histories[benchmark_label]
+    benchmark_return = benchmark_returns[benchmark_label]
+
+    stock_betas = []
+    unavailable = []
+    for h in holdings:
+        stock_history = get_price_history(h.ticker)
+        b = analysis.stock_beta(stock_history, benchmark_history)
+        if b is None:
+            unavailable.append(h.ticker)
+        else:
+            value = (live_prices.get(h.ticker) or h.avg_cost) * h.quantity
+            stock_betas.append((b, value))
+
+    portfolio_beta = analysis.portfolio_beta(stock_betas, cash_value=cash)
+
+    if portfolio_beta is None or benchmark_return is None:
+        st.info("Not enough live price history yet to compute beta and alpha for this portfolio.")
+        return
+
+    alpha = jensens_alpha(portfolio_return, benchmark_return, portfolio_beta, risk_free_rate)
+    bc1, bc2, bc3 = st.columns(3)
+    with bc1:
+        with st.container(border=True):
+            st.metric("Portfolio Beta", f"{portfolio_beta:.2f}")
+    with bc2:
+        with st.container(border=True):
+            st.metric(f"{benchmark_label} Return", f"{benchmark_return:+.2f}%")
+    with bc3:
+        with st.container(border=True):
+            st.metric("Alpha (α)", f"{alpha:+.2f}%")
+
+    if alpha > 0:
+        st.success(f"Positive alpha: your portfolio beat what its risk level (beta {portfolio_beta:.2f}) would predict against {benchmark_label}.")
+    else:
+        st.warning(f"Negative alpha: your portfolio fell short of what its risk level (beta {portfolio_beta:.2f}) would predict against {benchmark_label}.")
+
+    if unavailable:
+        st.caption(f"Beta excludes {', '.join(unavailable)} - not enough live price history for them yet.")
+    st.caption(
+        "Beta is estimated from each stock's own recent daily price history against "
+        f"{benchmark_label}; foreign stocks use their native-currency returns (day-to-day INR "
+        "exchange-rate moves aren't factored into beta). Idle cash contributes a beta of 0."
+    )
+
+
 def _dashboard() -> None:
     st_autorefresh(interval=AUTOREFRESH_MS, key="pt_autorefresh")
 
@@ -517,7 +629,9 @@ def _dashboard() -> None:
     live_prices_for_summary = get_live_prices(tuple(h.ticker for h in holdings_for_summary)) if holdings_for_summary else {}
     holdings_value = sum((live_prices_for_summary.get(h.ticker) or h.avg_cost) * h.quantity for h in holdings_for_summary)
 
-    tab_home, tab_orders, tab_portfolio, tab_leaderboard = st.tabs(["Home", "Orders", "Portfolio", "Leaderboard"])
+    tab_home, tab_orders, tab_portfolio, tab_benchmarks, tab_leaderboard = st.tabs(
+        ["Home", "Orders", "Portfolio", "Benchmarks", "Leaderboard"]
+    )
 
     with tab_home:
         _summary_card(user.cash, holdings_value)
@@ -540,6 +654,10 @@ def _dashboard() -> None:
         c2.metric("Holdings Value", f"{holdings_value:,.2f}")
         st.write("")
         _holdings_table(user_key)
+
+    with tab_benchmarks:
+        created_at = dt.datetime.fromisoformat(user.created_at).date()
+        _benchmarks_tab(created_at, user.cash, holdings_for_summary, live_prices_for_summary)
 
     with tab_leaderboard:
         _leaderboard(user_key)

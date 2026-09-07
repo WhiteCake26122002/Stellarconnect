@@ -18,6 +18,8 @@ rate), which is disclosed in the UI.
 """
 from __future__ import annotations
 
+import datetime as dt
+
 import pandas as pd
 import streamlit as st
 import yfinance as yf
@@ -25,6 +27,9 @@ import yfinance as yf
 QUOTE_TTL_SECONDS = 20
 HISTORY_TTL_SECONDS = 60
 FX_TTL_SECONDS = 300  # FX moves slowly enough that a 5-minute cache is plenty fresh
+PRICE_HISTORY_TTL_SECONDS = 6 * 3600
+PRICE_HISTORY_PERIOD = "2y"  # covers both the benchmark "what if" comparison since account
+                             # creation and the ~1y window the beta regression uses
 
 NIFTY_TICKER = "^NSEI"
 SENSEX_TICKER = "^BSESN"
@@ -40,6 +45,16 @@ SECTOR_INDICES: list[tuple[str, str]] = [
     ("METAL", "^CNXMETAL"),
     ("VIX", "^INDIAVIX"),
 ]
+
+# Broad-market benchmarks for the portfolio-vs-index comparison and the beta/alpha calculation.
+# NIFTY 50 is the default "the market" proxy for beta/alpha; the other three let a user compare
+# their return against a broader (500) or size-tilted (mid/small cap) slice of the market too.
+BENCHMARK_INDICES: dict[str, str] = {
+    "NIFTY 50": NIFTY_TICKER,
+    "NIFTY 500": "^CRSLDX",
+    "NIFTY MIDCAP 150": "NIFTYMIDCAP150.NS",
+    "NIFTY SMALLCAP 250": "NIFTYSMLCAP250.NS",
+}
 
 
 @st.cache_data(ttl=FX_TTL_SECONDS, show_spinner=False)
@@ -112,6 +127,23 @@ def get_intraday_history(ticker: str) -> pd.DataFrame:
         return hist[["Close"]].reset_index() if not hist.empty else pd.DataFrame()
     except Exception:
         return pd.DataFrame()
+
+
+@st.cache_data(ttl=PRICE_HISTORY_TTL_SECONDS, show_spinner=False)
+def get_price_history(ticker: str, period: str = PRICE_HISTORY_PERIOD) -> list[tuple[dt.date, float]]:
+    """
+    Daily closing prices for `ticker`, oldest first, in its native currency (no FX conversion -
+    the benchmark "what if" comparison and the beta regression only need a series to be
+    internally consistent with itself, and adding day-by-day historical FX would need a second
+    data source). Empty list on failure.
+    """
+    try:
+        hist = yf.Ticker(ticker).history(period=period, interval="1d")
+        if hist.empty:
+            return []
+        return [(idx.date(), float(close)) for idx, close in hist["Close"].items()]
+    except Exception:
+        return []
 
 
 def resolve_company_name(ticker: str) -> str:
