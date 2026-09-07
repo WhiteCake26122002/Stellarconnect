@@ -220,19 +220,61 @@ def inject_css() -> None:
         }}
 
         /* ---- Tabs ---------------------------------------------------- */
-        button[data-baseweb="tab"] {{
+        [data-testid="stTab"] {{
             font-weight: 600;
             font-size: 0.92rem;
             color: {MUTED} !important;
+            transition: color 0.15s ease;
         }}
-        button[data-baseweb="tab"][aria-selected="true"] {{
+        [data-testid="stTab"]:hover {{
             color: {INK} !important;
         }}
-        div[data-baseweb="tab-highlight"] {{
+        [data-testid="stTab"][aria-selected="true"] {{
+            color: {INK} !important;
+        }}
+        /* React Aria's own selection-indicator class (not Streamlit's, so it isn't a
+           data-testid) - the moving underline beneath the active tab. */
+        .react-aria-SelectionIndicator {{
             background-color: {NAVY_LIGHT} !important;
             height: 3px !important;
+            border-radius: 2px;
         }}
-        div[data-baseweb="tab-border"] {{ background-color: {BORDER} !important; }}
+
+        /* ---- Radio groups: a segmented-pill look instead of bare dots -------- */
+        [data-testid="stRadioOption"] {{
+            border-radius: 8px;
+            padding: 4px 10px;
+            margin: 1px 0;
+            transition: background-color 0.15s ease;
+        }}
+        [data-testid="stRadioOption"]:hover {{
+            background: rgba(255,255,255,0.06);
+        }}
+        [data-testid="stRadioOption"][data-selected="true"] {{
+            background: {NAVY_LIGHT}2E;
+        }}
+
+        /* ---- Text / number / select inputs: a brand focus glow --------------- */
+        [data-testid="stTextInputRootElement"], [data-testid="stNumberInputContainer"],
+        [data-testid="stSelectbox"] [role="group"] {{
+            transition: box-shadow 0.15s ease, border-color 0.15s ease;
+        }}
+        [data-testid="stTextInputRootElement"]:focus-within,
+        [data-testid="stNumberInputContainer"]:focus-within,
+        [data-testid="stSelectbox"] [role="group"]:focus-within {{
+            box-shadow: 0 0 0 3px {NAVY_LIGHT}33;
+            border-color: {NAVY_LIGHT} !important;
+        }}
+
+        /* ---- Alerts: a colored left edge that names the severity at a glance -- */
+        [data-testid="stAlertContainer"] {{
+            border-left: 3px solid transparent;
+            border-radius: 8px;
+        }}
+        [data-testid="stAlertContainer"]:has([data-testid="stAlertContentSuccess"]) {{ border-left-color: {BULL}; }}
+        [data-testid="stAlertContainer"]:has([data-testid="stAlertContentInfo"]) {{ border-left-color: {NAVY_LIGHT}; }}
+        [data-testid="stAlertContainer"]:has([data-testid="stAlertContentWarning"]) {{ border-left-color: {WARN}; }}
+        [data-testid="stAlertContainer"]:has([data-testid="stAlertContentError"]) {{ border-left-color: {BEAR}; }}
 
         /* ---- Sidebar ---------------------------------------------------- */
         section[data-testid="stSidebar"] {{
@@ -277,12 +319,38 @@ def inject_css() -> None:
             div.stButton > button, div.stDownloadButton > button {{ transition: none; }}
             div.stButton > button:active, div.stDownloadButton > button:active {{ transform: none; }}
         }}
-        div[data-testid="stSegmentedControl"] label {{
+
+        /* Primary actions (Enter, Add to Portfolio, ...) get real visual weight - a solid
+           brand fill that lifts and glows on hover - instead of reading the same as every
+           secondary button on the page. */
+        button[data-testid="stBaseButton-primary"] {{
+            background: {NAVY_LIGHT} !important;
+            border: 1px solid {NAVY_LIGHT} !important;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.35);
+            transition: transform 0.15s ease, box-shadow 0.15s ease, filter 0.15s ease;
+        }}
+        button[data-testid="stBaseButton-primary"]:hover {{
+            filter: brightness(1.12);
+            box-shadow: 0 6px 18px {NAVY_LIGHT}55;
+            transform: translateY(-1px);
+        }}
+        @media (prefers-reduced-motion: reduce) {{
+            button[data-testid="stBaseButton-primary"] {{ transition: none; }}
+            button[data-testid="stBaseButton-primary"]:hover {{ transform: none; }}
+        }}
+
+        /* ---- Spinner: a brand-colored sweep instead of Streamlit's neutral notch ---- */
+        [data-testid="stSpinnerIcon"] {{
+            border-top-color: {NAVY_LIGHT} !important;
+            border-right-color: {NAVY_LIGHT}66 !important;
+        }}
+        [data-testid="stButtonGroup"] button[data-variant="segmented_control"] {{
             background: {BLACK} !important;
             border-color: {BORDER} !important;
             color: {MUTED} !important;
+            transition: background-color 0.15s ease, color 0.15s ease;
         }}
-        div[data-testid="stSegmentedControl"] label[aria-checked="true"] {{
+        [data-testid="stButtonGroup"] button[data-variant="segmented_control"][aria-checked="true"] {{
             background: {NAVY_LIGHT} !important;
             color: {INK} !important;
         }}
