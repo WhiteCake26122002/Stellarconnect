@@ -75,6 +75,13 @@ def _add_fund_section(user_key: str) -> None:
     choice = st.selectbox("Matching schemes", list(options.keys()), key="mf_scheme_choice")
     selected = options[choice]
 
+    detail = nav.get_scheme_detail(selected["code"])
+    if detail is None:
+        st.warning("Could not fetch a live NAV for this scheme right now. Try again shortly.")
+        return
+    latest_date, latest_price = nav.latest_nav(detail)
+    st.metric("Latest NAV", f"Rs. {latest_price:,.4f}", help=f"As of {latest_date.strftime('%d %b %Y')}")
+
     c1, c2 = st.columns(2)
     units = c1.number_input("Units", min_value=0.0, step=1.0, key="mf_units_input")
     nav_mode = c2.radio("Purchase NAV", ["Use latest NAV", "Enter manually"], key="mf_nav_mode")
@@ -87,19 +94,16 @@ def _add_fund_section(user_key: str) -> None:
             "When did you buy this?", value=dt.date.today(), max_value=dt.date.today(), key="mf_purchase_date_input",
         )
         st.caption("Set the actual purchase date for an existing holding so returns (XIRR) are calculated correctly.")
+        if units > 0 and manual_nav:
+            st.caption(f"Order value: Rs. {units * manual_nav:,.2f}")
+    elif units > 0:
+        st.caption(f"Order value at latest NAV: Rs. {units * latest_price:,.2f}")
 
     if st.button("Add to Portfolio", type="primary", key="mf_add_button"):
-        detail = nav.get_scheme_detail(selected["code"])
-        if nav_mode == "Use latest NAV":
-            if detail is None:
-                st.error("Could not fetch a live NAV for this scheme right now.")
-                return
-            _, purchase_nav = nav.latest_nav(detail)
-        else:
-            purchase_nav = manual_nav
+        purchase_nav = latest_price if nav_mode == "Use latest NAV" else manual_nav
         try:
             store.add_holding(user_key, selected["code"], selected["name"], units, purchase_nav, purchase_date.isoformat())
-            st.success(f"Added {units:g} units of {selected['name']}.")
+            st.success(f"Added {units:g} units of {selected['name']} at Rs. {purchase_nav:,.4f}.")
             st.rerun()
         except store.MFError as e:
             st.error(str(e))
