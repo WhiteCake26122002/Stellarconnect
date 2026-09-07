@@ -40,14 +40,14 @@ ui_theme.inject_css()
 
 st.sidebar.title("Mode")
 app_mode = st.sidebar.radio(
-    "Choose a tool", ["DCF Valuation", "📈 Paper Trading", "🏦 Mutual Funds"], index=0, key="app_mode",
+    "Choose a tool", ["DCF Valuation", "Paper Trading", "Mutual Funds"], index=0, key="app_mode",
 )
-if app_mode.startswith("📈"):
+if app_mode == "Paper Trading":
     import ui_trading
 
     ui_trading.render()
     st.stop()
-if app_mode.startswith("🏦"):
+if app_mode == "Mutual Funds":
     import ui_mutual_funds
 
     ui_mutual_funds.render()
@@ -190,8 +190,8 @@ st.caption(
 
 tabs = st.tabs(
     [
-        "📊 Dashboard", "📄 Financials", "📈 Historical Analysis", "🔮 Forecast", "💰 DCF",
-        "🎭 Scenarios", "🎛️ Sensitivity", "📋 Assumptions", "✅ Model Quality", "⬇️ Export",
+        "Dashboard", "Financials", "Historical Analysis", "Forecast", "DCF",
+        "Scenarios", "Sensitivity", "Assumptions", "Model Quality", "Export",
     ]
 )
 

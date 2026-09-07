@@ -153,22 +153,6 @@ def _css() -> None:
         .pt-watch-chg {{ font-size:0.72rem; font-weight:600; text-align:right; }}
         .pt-watch-chg.up {{ color:{ui_theme.BULL}; }}
         .pt-watch-chg.down {{ color:{ui_theme.BEAR}; }}
-
-        /* Bordered containers (watchlist rows, feature cards, Popular Stocks cards) get a subtle
-           lift on hover, same as the rest of the app's bordered metric cards. Only ever loaded on
-           this page. DCF mode never calls this CSS. */
-        div[data-testid="stVerticalBlockBorderWrapper"] {{
-            transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
-        }}
-        div[data-testid="stVerticalBlockBorderWrapper"]:hover {{
-            border-color: rgba(255,255,255,0.28) !important; box-shadow: 0 8px 22px rgba(0,0,0,0.35);
-        }}
-        section[data-testid="stSidebar"] div[data-testid="stVerticalBlockBorderWrapper"]:hover {{
-            transform: translateX(2px);
-        }}
-        div[data-testid="stMainBlockContainer"] div[data-testid="stVerticalBlockBorderWrapper"]:hover {{
-            transform: translateY(-3px);
-        }}
         </style>
         """),
         unsafe_allow_html=True,

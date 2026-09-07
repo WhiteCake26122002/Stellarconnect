@@ -50,11 +50,33 @@ def _flatten_html(html: str) -> str:
 
 def inject_css() -> None:
     st.markdown(
+        """
+        <link rel="preconnect" href="https://fonts.googleapis.com">
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+        """,
+        unsafe_allow_html=True,
+    )
+    st.markdown(
         f"""
         <style>
         .stApp {{
-            font-family: -apple-system, "Segoe UI", Inter, Roboto, sans-serif;
+            font-family: 'Inter', -apple-system, "Segoe UI", Roboto, sans-serif;
             background: {BLACK};
+        }}
+
+        /* Financial figures (metrics, tables) hold a fixed digit width so a refreshing
+           number never jitters or reflows its neighbors. */
+        div[data-testid="stMetricValue"], div[data-testid="stDataFrame"] {{
+            font-variant-numeric: tabular-nums;
+        }}
+
+        /* A visible, on-brand focus ring for keyboard navigation - browsers otherwise fall
+           back to a default outline that doesn't match the rest of the theme. */
+        button:focus-visible, input:focus-visible, textarea:focus-visible, a:focus-visible,
+        [role="tab"]:focus-visible, [role="radio"]:focus-visible {{
+            outline: 2px solid {NAVY_LIGHT} !important;
+            outline-offset: 2px !important;
         }}
 
         /* ---- Metric cards ---------------------------------------------- */
@@ -88,6 +110,23 @@ def inject_css() -> None:
             background: {PANEL};
             border: 1px solid {BORDER} !important;
             border-radius: 12px;
+            transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+        }}
+        /* A card that reacts to the cursor reads as interactive everywhere in the app, not
+           just the pages that happened to define this locally. */
+        div[data-testid="stVerticalBlockBorderWrapper"]:hover {{
+            border-color: rgba(255,255,255,0.28) !important;
+            box-shadow: 0 8px 22px rgba(0,0,0,0.35);
+        }}
+        section[data-testid="stSidebar"] div[data-testid="stVerticalBlockBorderWrapper"]:hover {{
+            transform: translateX(2px);
+        }}
+        div[data-testid="stMainBlockContainer"] div[data-testid="stVerticalBlockBorderWrapper"]:hover {{
+            transform: translateY(-3px);
+        }}
+        @media (prefers-reduced-motion: reduce) {{
+            div[data-testid="stVerticalBlockBorderWrapper"] {{ transition: none; }}
+            div[data-testid="stVerticalBlockBorderWrapper"]:hover {{ transform: none; }}
         }}
 
         /* ---- Tabs ---------------------------------------------------- */
@@ -136,6 +175,17 @@ def inject_css() -> None:
             background: {NAVY};
             border: 1px solid {BORDER};
             color: {INK};
+            transition: transform 0.1s ease, border-color 0.15s ease, background-color 0.15s ease;
+        }}
+        div.stButton > button:hover, div.stDownloadButton > button:hover {{
+            border-color: {NAVY_LIGHT};
+        }}
+        div.stButton > button:active, div.stDownloadButton > button:active {{
+            transform: scale(0.97);
+        }}
+        @media (prefers-reduced-motion: reduce) {{
+            div.stButton > button, div.stDownloadButton > button {{ transition: none; }}
+            div.stButton > button:active, div.stDownloadButton > button:active {{ transform: none; }}
         }}
         div[data-testid="stSegmentedControl"] label {{
             background: {BLACK} !important;
