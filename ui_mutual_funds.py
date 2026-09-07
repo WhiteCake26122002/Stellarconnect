@@ -221,6 +221,79 @@ def _render_breakdown(allocation: dict[str, float]) -> None:
                 )
 
 
+def _portfolio_growth_series(
+    available: list[dict], benchmark_histories: dict[str, list[tuple[dt.date, float]]]
+) -> pd.DataFrame | None:
+    """
+    Reconstructs actual portfolio value over time from each holding's own daily NAV history
+    (real data - every point is a real historical NAV, not interpolated or synthetic), next to
+    what the same rupees would be worth in each benchmark over the same period. Sampled weekly
+    from the earliest purchase date to today to keep the chart light.
+    """
+    schemes = []
+    for h in available:
+        detail = nav.get_scheme_detail(h["scheme_code"])
+        if detail is None:
+            continue
+        schemes.append((h["purchase_date"], h["units"], h["invested"], detail["nav_history"]))
+    if not schemes:
+        return None
+
+    start = min(purchase_date for purchase_date, _, _, _ in schemes)
+    today = dt.date.today()
+    if start >= today:
+        return None
+
+    dates = list(pd.date_range(start, today, freq="W").date)
+    if not dates or dates[-1] != today:
+        dates.append(today)
+
+    rows = []
+    for d in dates:
+        held = [(pd_, u, inv, hist) for pd_, u, inv, hist in schemes if pd_ <= d]
+        if not held:
+            continue
+        portfolio_value = 0.0
+        portfolio_ok = True
+        for _, units, _, hist in held:
+            price = analysis.price_on_or_before(hist, d)
+            if price is None:
+                portfolio_ok = False
+                break
+            portfolio_value += units * price
+        row = {"Date": d, "Your Portfolio": portfolio_value if portfolio_ok else None}
+        for label, bench_hist in benchmark_histories.items():
+            if not bench_hist:
+                row[label] = None
+                continue
+            total = 0.0
+            ok = True
+            for pd_, _, invested, _ in held:
+                bev = analysis.benchmark_equivalent_value(invested, pd_, d, bench_hist)
+                if bev is None:
+                    ok = False
+                    break
+                total += bev
+            row[label] = total if ok else None
+        rows.append(row)
+    return pd.DataFrame(rows) if len(rows) >= 2 else None
+
+
+def _render_growth_chart(df: pd.DataFrame) -> None:
+    line_colors = {"Your Portfolio": ui_theme.NAVY_LIGHT, "NIFTY 50": "#38BDF8", "NIFTY 500": "#FBBF24"}
+    fig = go.Figure()
+    for col in df.columns:
+        if col == "Date":
+            continue
+        fig.add_trace(go.Scatter(
+            x=df["Date"], y=df[col], mode="lines", name=col, connectgaps=False,
+            line=dict(width=2.5, color=line_colors.get(col)),
+        ))
+    ui_theme.base_layout(fig, height=320)
+    fig.update_yaxes(title_text="Value (Rs.)", tickprefix="")
+    st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+
+
 def _analysis_tab(enriched: list[dict]) -> None:
     available = [h for h in enriched if h["data_available"]]
     if not available:
@@ -264,6 +337,17 @@ def _analysis_tab(enriched: list[dict]) -> None:
         if comparable:
             beaten = [label for label, r in comparable.items() if portfolio_xirr > r]
             st.caption(f"Outperforming {len(beaten)}/{len(comparable)} benchmarks shown above.")
+
+    st.write("")
+    growth_df = _portfolio_growth_series(available, benchmark_histories)
+    if growth_df is not None:
+        st.markdown("**Growth Over Time**")
+        _render_growth_chart(growth_df)
+        st.caption(
+            "Your Portfolio traces the actual historical NAV of each holding from its purchase "
+            "date; the benchmark lines show what those same rupees, on those same dates, would be "
+            "worth in that index instead."
+        )
 
     st.write("")
     st.markdown("**Fund Performance (vs NIFTY 500)**")

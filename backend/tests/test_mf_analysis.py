@@ -52,6 +52,14 @@ def test_price_on_or_before_returns_none_when_target_predates_history():
     assert price_on_or_before(history, dt.date(2026, 1, 1)) is None
 
 
+def test_price_on_or_before_works_with_descending_input():
+    # AMFI-style NAV history (backend/mutual_funds/nav.py) is stored most-recent-first, unlike
+    # the ascending market-data history most other callers pass - must not silently return the
+    # oldest price in history when given this order.
+    history = [(dt.date(2026, 1, 10), 120.0), (dt.date(2026, 1, 5), 110.0), (dt.date(2026, 1, 1), 100.0)]
+    assert price_on_or_before(history, dt.date(2026, 1, 7)) == 110.0
+
+
 def test_benchmark_equivalent_value_scales_by_index_growth():
     history = [(dt.date(2025, 1, 1), 100.0), (dt.date(2026, 1, 1), 110.0)]
     result = benchmark_equivalent_value(10000.0, dt.date(2025, 1, 1), dt.date(2026, 1, 1), history)

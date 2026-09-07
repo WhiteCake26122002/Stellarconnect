@@ -46,9 +46,17 @@ def xirr(cash_flows: list[tuple[dt.date, float]]) -> float | None:
 
 
 def price_on_or_before(history: list[tuple[dt.date, float]], target: dt.date) -> float | None:
-    """Most recent price on or before `target` (markets are closed weekends/holidays)."""
-    candidates = [price for date, price in history if date <= target]
-    return candidates[-1] if candidates else None
+    """
+    Most recent price on or before `target` (markets are closed weekends/holidays). Works
+    regardless of whether `history` is sorted ascending or descending by date - some callers hand
+    this AMFI NAV history (most-recent-first) and others hand it plain market data
+    (oldest-first), and picking the wrong end of an unsorted-relative-to-assumption list would
+    silently return the earliest price in history instead of the most recent one.
+    """
+    candidates = [(date, price) for date, price in history if date <= target]
+    if not candidates:
+        return None
+    return max(candidates, key=lambda pair: pair[0])[1]
 
 
 def benchmark_equivalent_value(
