@@ -122,12 +122,16 @@ def _portfolio_tab(user_key: str, enriched: list[dict]) -> None:
     total_value = sum(h["value"] for h in enriched)
     total_gain = total_value - total_invested
 
+    gain_pct = (total_gain / total_invested * 100) if total_invested else 0.0
     c1, c2, c3 = st.columns(3)
-    c1.metric("Invested", f"Rs. {total_invested:,.2f}")
-    c2.metric("Current Value", f"Rs. {total_value:,.2f}")
-    c3.metric(
-        "Overall Gain/Loss", f"Rs. {total_gain:,.2f}",
-        f"{(total_gain / total_invested * 100) if total_invested else 0:+.2f}%",
+    c1.markdown(ui_theme.kpi_card("Invested", f"Rs. {total_invested:,.2f}", icon="wallet"), unsafe_allow_html=True)
+    c2.markdown(ui_theme.kpi_card("Current Value", f"Rs. {total_value:,.2f}", icon="layers"), unsafe_allow_html=True)
+    c3.markdown(
+        ui_theme.kpi_card(
+            "Overall Gain/Loss", f"Rs. {total_gain:,.2f}",
+            icon="trending-up" if total_gain >= 0 else "trending-down", change_pct=gain_pct,
+        ),
+        unsafe_allow_html=True,
     )
 
     st.write("")

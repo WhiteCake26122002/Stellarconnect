@@ -48,6 +48,56 @@ def _flatten_html(html: str) -> str:
     return "\n".join(line.strip() for line in html.strip().split("\n"))
 
 
+# Small, hand-picked Lucide-style icon set (MIT licensed, stroke-based, 24x24 viewBox) for KPI
+# cards - inline SVG rather than emoji or an icon-font CDN, so it never depends on font coverage
+# or an external request that could fail.
+_KPI_ICONS = {
+    "wallet": '<path d="M21 12V7H5a2 2 0 0 1 0-4h14v4"/><path d="M3 5v14a2 2 0 0 0 2 2h16v-5"/><path d="M18 12a2 2 0 0 0 0 4h4v-4Z"/>',
+    "trending-up": '<polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/>',
+    "trending-down": '<polyline points="22 17 13.5 8.5 8.5 13.5 2 7"/><polyline points="16 17 22 17 22 11"/>',
+    "bar-chart": '<line x1="12" x2="12" y1="20" y2="10"/><line x1="18" x2="18" y1="20" y2="4"/><line x1="6" x2="6" y1="20" y2="16"/>',
+    "percent": '<line x1="19" x2="5" y1="5" y2="19"/><circle cx="6.5" cy="6.5" r="2.5"/><circle cx="17.5" cy="17.5" r="2.5"/>',
+    "layers": '<path d="m12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83Z"/><path d="m22 17.65-9.17 4.16a2 2 0 0 1-1.66 0L2 17.65"/><path d="m22 12.65-9.17 4.16a2 2 0 0 1-1.66 0L2 12.65"/>',
+    "target": '<circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/>',
+    "shield-check": '<path d="M20 13c0 5-3.5 7.5-7.35 8.95a1 1 0 0 1-1.3 0C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.79 17 5 19 5a1 1 0 0 1 1 1Z"/><path d="m9 12 2 2 4-4"/>',
+}
+
+
+def kpi_card(label: str, value: str, icon: str = "bar-chart", change_pct: float | None = None) -> str:
+    """
+    A KPI/metric card: an icon in a soft-tinted circle, an optional up/down trend badge, a large
+    value, and a label - used everywhere a plain st.metric() needs more visual weight (portfolio
+    value, enterprise value, cash left, etc). Pure HTML + inline SVG, no components.html and no
+    fixed height, so unlike an iframe-based card it can never clip wrapped text.
+
+    Pass `change_pct=None` (the default) for a point-in-time figure with no real trend to show
+    (e.g. WACC, a valuation multiple) - the badge is only rendered when there's an actual change
+    to disclose, never faked for visual symmetry.
+    """
+    icon_path = _KPI_ICONS.get(icon, _KPI_ICONS["bar-chart"])
+    icon_html = (
+        '<div class="kpi-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" '
+        f'stroke-width="2" stroke-linecap="round" stroke-linejoin="round">{icon_path}</svg></div>'
+    )
+    badge_html = ""
+    if change_pct is not None:
+        cls = "up" if change_pct >= 0 else "down"
+        arrow = "M12 19V5M5 12l7-7 7 7" if change_pct >= 0 else "M12 5v14M19 12l-7 7-7-7"
+        badge_html = (
+            f'<div class="kpi-badge {cls}">'
+            '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" '
+            f'stroke-linecap="round" stroke-linejoin="round"><path d="{arrow}"/></svg>'
+            f"{abs(change_pct):.1f}%</div>"
+        )
+    return _flatten_html(f"""
+    <div class="kpi-card">
+        <div class="kpi-top">{icon_html}{badge_html}</div>
+        <div class="kpi-value">{value}</div>
+        <div class="kpi-label">{label}</div>
+    </div>
+    """)
+
+
 def inject_css() -> None:
     st.markdown(
         """
@@ -98,6 +148,46 @@ def inject_css() -> None:
             font-size: 1.5rem;
             color: {INK};
         }}
+
+        /* ---- KPI cards (icon + optional trend badge + big value) --------- */
+        .kpi-card {{
+            background: {PANEL};
+            border: 1px solid {BORDER};
+            border-radius: 12px;
+            padding: 1.1rem 1.2rem;
+            transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+        }}
+        .kpi-card:hover {{
+            border-color: rgba(255,255,255,0.28);
+            box-shadow: 0 8px 22px rgba(0,0,0,0.35);
+            transform: translateY(-3px);
+        }}
+        .kpi-top {{ display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.9rem; }}
+        .kpi-icon {{
+            width: 40px; height: 40px; border-radius: 10px;
+            background: {NAVY_LIGHT}22; color: {NAVY_LIGHT};
+            display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+        }}
+        .kpi-icon svg {{ width: 20px; height: 20px; }}
+        .kpi-badge {{
+            display: inline-flex; align-items: center; gap: 3px;
+            font-size: 0.74rem; font-weight: 700;
+            padding: 3px 8px; border-radius: 999px; white-space: nowrap;
+        }}
+        .kpi-badge svg {{ width: 12px; height: 12px; }}
+        .kpi-badge.up {{ background: {BULL_SOFT}; color: {BULL}; }}
+        .kpi-badge.down {{ background: {BEAR_SOFT}; color: {BEAR}; }}
+        .kpi-value {{
+            font-size: 1.7rem; font-weight: 800; color: {INK};
+            margin-bottom: 0.15rem; letter-spacing: -0.01em;
+            font-variant-numeric: tabular-nums;
+        }}
+        .kpi-label {{ font-size: 0.82rem; color: {MUTED}; font-weight: 500; }}
+        @media (prefers-reduced-motion: reduce) {{
+            .kpi-card {{ transition: none; }}
+            .kpi-card:hover {{ transform: none; }}
+        }}
+
         /* ---- Header / title ---------------------------------------------- */
         h1, h2, h3, h4, p, span, label, .stMarkdown {{
             color: {INK};

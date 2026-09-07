@@ -253,20 +253,26 @@ with tabs[0]:
                 "trusting the implied share price below."
             )
 
-        with st.container(border=True):
-            c1, c2, c3, c4, c5 = st.columns(5)
-            c1.metric("Enterprise Value", money(valuation.enterprise_value))
-            c2.metric("Equity Value", money(valuation.equity_bridge.equity_value))
-            c3.metric("Implied Share Price", per_share_fmt(valuation.equity_bridge.equity_value_per_share))
-            c4.metric("Current Share Price", per_share_fmt(valuation.equity_bridge.current_share_price))
-            upside = valuation.equity_bridge.upside_downside
-            c5.metric("Upside / (Downside)", pct(upside))
+        upside = valuation.equity_bridge.upside_downside
+        c1, c2, c3, c4, c5 = st.columns(5)
+        c1.markdown(ui_theme.kpi_card("Enterprise Value", money(valuation.enterprise_value), icon="layers"), unsafe_allow_html=True)
+        c2.markdown(ui_theme.kpi_card("Equity Value", money(valuation.equity_bridge.equity_value), icon="wallet"), unsafe_allow_html=True)
+        c3.markdown(ui_theme.kpi_card("Implied Share Price", per_share_fmt(valuation.equity_bridge.equity_value_per_share), icon="target"), unsafe_allow_html=True)
+        c4.markdown(ui_theme.kpi_card("Current Share Price", per_share_fmt(valuation.equity_bridge.current_share_price), icon="bar-chart"), unsafe_allow_html=True)
+        c5.markdown(
+            ui_theme.kpi_card(
+                "Upside / (Downside)", pct(upside),
+                icon="trending-up" if upside >= 0 else "trending-down", change_pct=upside * 100,
+            ),
+            unsafe_allow_html=True,
+        )
 
-            c6, c7, c8, c9 = st.columns(4)
-            c6.metric("WACC", pct(wacc_result.wacc))
-            c7.metric("Terminal Growth", pct(terminal_growth))
-            c8.metric("Terminal EBITDA Margin", pct(forecast.years[-1].ebitda_margin))
-            c9.metric("Terminal Value % of EV", pct(valuation.terminal_value_pct_of_ev))
+        st.write("")
+        c6, c7, c8, c9 = st.columns(4)
+        c6.markdown(ui_theme.kpi_card("WACC", pct(wacc_result.wacc), icon="percent"), unsafe_allow_html=True)
+        c7.markdown(ui_theme.kpi_card("Terminal Growth", pct(terminal_growth), icon="percent"), unsafe_allow_html=True)
+        c8.markdown(ui_theme.kpi_card("Terminal EBITDA Margin", pct(forecast.years[-1].ebitda_margin), icon="percent"), unsafe_allow_html=True)
+        c9.markdown(ui_theme.kpi_card("Terminal Value % of EV", pct(valuation.terminal_value_pct_of_ev), icon="percent"), unsafe_allow_html=True)
         if valuation.terminal_value_pct_of_ev > 0.90:
             st.warning(f"Terminal value represents {pct(valuation.terminal_value_pct_of_ev)} of Enterprise Value — unusually high; the explicit forecast is contributing almost nothing to the valuation. Consider a longer forecast horizon or double-checking WACC and terminal growth.")
 

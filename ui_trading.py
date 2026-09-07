@@ -325,10 +325,13 @@ def _summary_card(cash: float, holdings_value: float) -> float:
     net_worth = cash + holdings_value
     total_return = net_worth - STARTING_CASH
     total_return_pct = total_return / STARTING_CASH
-    with st.container(border=True):
-        st.caption("Portfolio value")
-        st.metric("Portfolio value", f"Rs. {net_worth:,.2f}", label_visibility="collapsed")
-        st.caption(f"Total returns: {total_return:+,.2f} ({total_return_pct:+.2%})")
+    st.markdown(
+        ui_theme.kpi_card(
+            f"Portfolio Value  ·  Total return {total_return:+,.2f}", f"Rs. {net_worth:,.2f}",
+            icon="wallet", change_pct=total_return_pct * 100,
+        ),
+        unsafe_allow_html=True,
+    )
     return net_worth
 
 
@@ -621,9 +624,9 @@ def _dashboard() -> None:
         _summary_card(user.cash, holdings_value)
         st.caption("Simulated cash, real live prices. This page refreshes itself every ~20 seconds.")
         m1, m2, m3 = st.columns(3)
-        m1.metric("Cash Left", f"Rs. {user.cash:,.2f}")
-        m2.metric("Stocks Bought", f"{len(holdings_for_summary)}")
-        m3.metric("Invested Value", f"Rs. {holdings_value:,.2f}")
+        m1.markdown(ui_theme.kpi_card("Cash Left", f"Rs. {user.cash:,.2f}", icon="wallet"), unsafe_allow_html=True)
+        m2.markdown(ui_theme.kpi_card("Stocks Bought", f"{len(holdings_for_summary)}", icon="bar-chart"), unsafe_allow_html=True)
+        m3.markdown(ui_theme.kpi_card("Invested Value", f"Rs. {holdings_value:,.2f}", icon="layers"), unsafe_allow_html=True)
         st.divider()
         _popular_stocks_row()
         st.divider()
@@ -634,8 +637,8 @@ def _dashboard() -> None:
 
     with tab_portfolio:
         c1, c2 = st.columns(2)
-        c1.metric("Cash", f"{user.cash:,.2f}")
-        c2.metric("Holdings Value", f"{holdings_value:,.2f}")
+        c1.markdown(ui_theme.kpi_card("Cash", f"Rs. {user.cash:,.2f}", icon="wallet"), unsafe_allow_html=True)
+        c2.markdown(ui_theme.kpi_card("Holdings Value", f"Rs. {holdings_value:,.2f}", icon="layers"), unsafe_allow_html=True)
         st.write("")
         _holdings_table(user_key)
 
