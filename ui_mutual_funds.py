@@ -16,10 +16,16 @@ from __future__ import annotations
 import datetime as dt
 
 import pandas as pd
+import plotly.graph_objects as go
 import streamlit as st
 
 import ui_common
+import ui_theme
 from backend.mutual_funds import analysis, nav, recommend, store
+
+# Qualitative palette for allocation charts - distinct, readable against the app's dark
+# background, in a fixed order so a given category's color stays consistent chart to chart.
+_BREAKDOWN_PALETTE = ["#38BDF8", "#A78BFA", "#F472B6", "#34D399", "#FBBF24", "#60A5FA", "#FB7185", "#4ADE80"]
 
 
 def _enrich(holdings: list) -> list[dict]:
@@ -165,14 +171,50 @@ def _insights_tab(enriched: list[dict]) -> None:
 
 
 def _render_breakdown(allocation: dict[str, float]) -> None:
+    """A single 100%-stacked horizontal bar (one colored segment per category) with a two-column
+    color-swatch legend below - reads at a glance, unlike a multi-bar chart for a handful of
+    categories that don't relate on a shared numeric axis."""
     if not allocation:
         st.caption("Not enough data to compute this yet.")
         return
-    series = pd.Series(allocation).sort_values(ascending=False)
-    st.bar_chart(series)
-    cols = st.columns(min(len(series), 4))
-    for i, (label, pct) in enumerate(series.items()):
-        cols[i % len(cols)].caption(f"{label}: {pct:.1f}%")
+    items = sorted(allocation.items(), key=lambda kv: kv[1], reverse=True)
+
+    fig = go.Figure()
+    for i, (label, pct) in enumerate(items):
+        color = _BREAKDOWN_PALETTE[i % len(_BREAKDOWN_PALETTE)]
+        fig.add_trace(go.Bar(
+            x=[pct], y=[""], orientation="h", marker=dict(color=color, line=dict(width=0)),
+            text=f"{pct:.0f}%" if pct >= 8 else "", textposition="inside", insidetextanchor="middle",
+            textfont=dict(color="#0B0B12", size=12, family="-apple-system, Segoe UI, Roboto, sans-serif"),
+            hovertemplate=f"{label}: {pct:.1f}%<extra></extra>", showlegend=False,
+        ))
+    fig.update_layout(
+        barmode="stack", height=56, margin=dict(t=4, b=4, l=4, r=4), bargap=0,
+        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+        xaxis=dict(visible=False, range=[0, 100], fixedrange=True),
+        yaxis=dict(visible=False, fixedrange=True),
+    )
+    st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+
+    # A fresh st.columns(2) per row (rather than one columns() call reused via index%2) so items
+    # fill left-to-right, top-to-bottom - the same reading order as the bar's segments - instead
+    # of top-to-bottom within each column first.
+    for row_start in range(0, len(items), 2):
+        row = list(enumerate(items[row_start:row_start + 2], start=row_start))
+        row_cols = st.columns(2)
+        for col, (i, (label, pct)) in zip(row_cols, row):
+            color = _BREAKDOWN_PALETTE[i % len(_BREAKDOWN_PALETTE)]
+            with col:
+                st.markdown(
+                    ui_theme._flatten_html(f"""
+                    <div style="display:flex; align-items:center; gap:8px; padding:3px 0;">
+                        <span style="width:11px; height:11px; border-radius:3px; background:{color}; flex-shrink:0;"></span>
+                        <span style="color:{ui_theme.MUTED}; font-size:0.84rem; flex:1;">{label}</span>
+                        <span style="color:{ui_theme.INK}; font-weight:700; font-size:0.84rem;">{pct:.1f}%</span>
+                    </div>
+                    """),
+                    unsafe_allow_html=True,
+                )
 
 
 def _analysis_tab(enriched: list[dict]) -> None:
@@ -251,15 +293,16 @@ def _analysis_tab(enriched: list[dict]) -> None:
 
     rows = [{"scheme_category": h["scheme_category"], "value": h["value"]} for h in available]
     asset_alloc = analysis.weighted_breakdown(rows, analysis.classify_asset_class)
-    st.markdown("**Asset Allocation**")
-    _render_breakdown(asset_alloc)
-    if asset_alloc:
-        top_label, top_pct = max(asset_alloc.items(), key=lambda kv: kv[1])
-        if top_pct >= 80:
-            st.warning(
-                f"Most of your investment is in {top_label} ({top_pct:.0f}%). "
-                "Consider whether that concentration matches your risk appetite."
-            )
+    with st.container(border=True):
+        st.markdown("**Asset Allocation**")
+        _render_breakdown(asset_alloc)
+        if asset_alloc:
+            top_label, top_pct = max(asset_alloc.items(), key=lambda kv: kv[1])
+            if top_pct >= 80:
+                st.warning(
+                    f"Most of your investment is in {top_label} ({top_pct:.0f}%). "
+                    "Consider whether that concentration matches your risk appetite."
+                )
 
     st.write("")
     equity_rows = [
@@ -268,18 +311,20 @@ def _analysis_tab(enriched: list[dict]) -> None:
     ]
     if equity_rows:
         cap_alloc = analysis.weighted_breakdown(equity_rows, analysis.classify_market_cap)
-        st.markdown("**Equity Market Cap Split**")
-        _render_breakdown(cap_alloc)
-        if cap_alloc:
-            top_label, top_pct = max(cap_alloc.items(), key=lambda kv: kv[1])
-            if top_pct >= 50:
-                st.warning(f"Your equity holdings are concentrated in {top_label} ({top_pct:.0f}%).")
+        with st.container(border=True):
+            st.markdown("**Equity Market Cap Split**")
+            _render_breakdown(cap_alloc)
+            if cap_alloc:
+                top_label, top_pct = max(cap_alloc.items(), key=lambda kv: kv[1])
+                if top_pct >= 50:
+                    st.warning(f"Your equity holdings are concentrated in {top_label} ({top_pct:.0f}%).")
 
     st.write("")
     amc_rows = [{"fund_house": h["fund_house"], "value": h["value"]} for h in available]
     amc_alloc = analysis.amc_breakdown(amc_rows)
-    st.markdown("**AMC Split**")
-    _render_breakdown(amc_alloc)
+    with st.container(border=True):
+        st.markdown("**AMC Split**")
+        _render_breakdown(amc_alloc)
 
     st.divider()
     st.caption(
