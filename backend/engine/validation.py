@@ -21,9 +21,13 @@ class IntegrityReport(BaseModel):
     issues: list[ValidationIssue]
 
     @property
+    def band(self) -> str:
+        verdict = "ready for review" if self.score >= 80 else "needs attention" if self.score >= 60 else "not reliable"
+        return f"Model {verdict}"
+
+    @property
     def summary(self) -> str:
-        band = "ready for review" if self.score >= 80 else "needs attention" if self.score >= 60 else "not reliable"
-        return f"{self.score}/{self.max_score} — Model {band}"
+        return f"{self.score}/{self.max_score} - {self.band}"
 
 
 def run_validation(
@@ -141,7 +145,7 @@ def run_validation(
                 severity="warning",
                 message=(
                     f"Minority interest and preferred stock together represent "
-                    f"{non_controlling_claims / valuation.enterprise_value:.0%} of Enterprise Value — unusually "
+                    f"{non_controlling_claims / valuation.enterprise_value:.0%} of Enterprise Value, unusually "
                     "large. Verify this figure against the source financial statements; it materially swings "
                     "the Enterprise Value -> Equity Value bridge."
                 ),
@@ -154,7 +158,7 @@ def run_validation(
             ValidationIssue(
                 severity="warning",
                 message=(
-                    f"Terminal value represents {valuation.terminal_value_pct_of_ev:.0%} of Enterprise Value — "
+                    f"Terminal value represents {valuation.terminal_value_pct_of_ev:.0%} of Enterprise Value, "
                     "unusually high even for a stable/mature company, meaning the explicit forecast period is "
                     "contributing almost nothing to the valuation and the result is dominated by two assumptions "
                     "(WACC and terminal growth). Consider a longer explicit forecast horizon (sidebar) or "

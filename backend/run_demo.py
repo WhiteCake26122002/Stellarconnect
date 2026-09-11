@@ -43,7 +43,7 @@ def pct(x: float | None) -> str:
 
 def main() -> None:
     print("=" * 78)
-    print("STEP 1-3: Upload & Normalize — Sample Company")
+    print("STEP 1-3: Upload & Normalize - Sample Company")
     print("=" * 78)
     company = build_orion_company()
     hist = build_orion_historicals()
@@ -143,7 +143,7 @@ def main() -> None:
 
     print()
     print("=" * 78)
-    print("STEP 13: Sensitivity — WACC vs. Terminal Growth (Enterprise Value)")
+    print("STEP 13: Sensitivity - WACC vs. Terminal Growth (Enterprise Value)")
     print("=" * 78)
     ctx = ValuationContext(
         cash_and_investments=latest_bs.total_cash_and_investments,

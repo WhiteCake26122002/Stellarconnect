@@ -14,7 +14,7 @@ https://pages.stern.nyu.edu/~adamodar/New_Home_Page/datafile/ratings.htm
 table for small-cap (<$5B) firms, but that table is dated January 2017 and
 mixing a decade-stale spread environment into an otherwise current WACC
 build risks introducing more error than it removes, so it is intentionally
-not used here — see the rationale text this module produces for that
+not used here; see the rationale text this module produces for that
 disclosure.
 
 This method is designed for non-financial operating companies (EBIT is a
@@ -95,7 +95,7 @@ def estimate_pretax_cost_of_debt(
             rationale=(
                 f"No meaningful interest expense reported{period_note}, so an interest-coverage-based "
                 "synthetic credit rating is not meaningful. Defaulted to the safest (Aaa/AAA, "
-                f"{spread:.2%} spread) tier as a conservative placeholder — this barely affects WACC "
+                f"{spread:.2%} spread) tier as a conservative placeholder; this barely affects WACC "
                 "when the debt weight is itself near zero. "
                 f"Cost of Debt = Risk-Free Rate ({risk_free_rate:.2%}) + Default Spread ({spread:.2%}) "
                 f"= {kd:.2%}. Source: {SOURCE}."

@@ -94,7 +94,7 @@ def fetch_company(ticker: str) -> IngestionResult:
             f"'{ticker}' ({info.get('industry')}) is a balance-sheet-driven financial institution "
             "(bank, NBFC/lender, or insurer), where borrowed funds are the business's raw material "
             "rather than operating leverage. A standard unlevered FCFF DCF is not methodologically "
-            "appropriate here — a bank-specific model (e.g. dividend discount or excess-return) is "
+            "appropriate here: a bank-specific model (e.g. dividend discount or excess-return) is "
             "needed instead. This app's automated Yahoo Finance ingestion supports non-financial "
             "companies only. Use 'Enter My Own Company' to build a custom model for this company instead."
         )
@@ -174,7 +174,7 @@ def fetch_company(ticker: str) -> IngestionResult:
         raise ValueError(
             f"'{ticker}' does not report EBITDA/EBIT on Yahoo Finance. This is expected for banks, insurers, "
             "and other financial institutions, where interest income/expense is the core business and a "
-            "standard unlevered FCFF DCF is not methodologically appropriate — a bank-specific model "
+            "standard unlevered FCFF DCF is not methodologically appropriate: a bank-specific model "
             "(e.g. dividend discount or excess-return) is needed instead. This app's automated Yahoo Finance "
             "ingestion supports non-financial companies only. Use 'Enter My Own Company' to build a custom "
             "model for this company instead."
@@ -309,13 +309,13 @@ def fetch_company(ticker: str) -> IngestionResult:
             warnings.append(
                 f"{fy}: Yahoo Finance's reported EBIT ({ebit / MILLION:,.0f}M) exceeds its reported EBITDA "
                 f"({ebitda / MILLION:,.0f}M), implying negative D&A. This is a data quality issue in the "
-                "source, not a calculation performed by this app — verify this year's figures independently "
+                "source, not a calculation performed by this app; verify this year's figures independently "
                 "before relying on them."
             )
         if revenue > 0 and ga < 0:
             warnings.append(
                 f"{fy}: Reported EBITDA ({ebitda / MILLION:,.0f}M) exceeds Revenue ({revenue / MILLION:,.0f}M), "
-                "which is not possible for operating income — verify this year's figures independently."
+                "which is not possible for operating income; verify this year's figures independently."
             )
 
         inc = IncomeStatement(

@@ -16,7 +16,7 @@ class TerminalValueResult(BaseModel):
 def gordon_growth_terminal_value(final_year_fcff: float, wacc: float, terminal_growth: float) -> float:
     if wacc <= terminal_growth:
         raise ValueError(
-            f"WACC ({wacc:.2%}) must exceed terminal growth ({terminal_growth:.2%}) — the Gordon Growth "
+            f"WACC ({wacc:.2%}) must exceed terminal growth ({terminal_growth:.2%}): the Gordon Growth "
             "formula is undefined/negative otherwise. Lower terminal growth or raise WACC."
         )
     terminal_fcf = final_year_fcff * (1 + terminal_growth)

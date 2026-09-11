@@ -113,14 +113,14 @@ else:
     company, hist = render_custom_company_form()
     if company is None or hist is None:
         st.stop()
-    st.success(f"Using your entered data for **{company.name}** — scroll down or check the sidebar to run the valuation.")
+    st.success(f"Using your entered data for **{company.name}**: scroll down or check the sidebar to run the valuation.")
 
 summary = analyze_historicals(hist)
 CURRENCY_SYMBOL = currency_symbol(company.currency)
 
 # ---------------------------------------------------------------- Sidebar --
 st.sidebar.title("DCF Assumptions")
-st.sidebar.caption(f"{company.name} ({company.ticker or 'n/a'}) — {company.company_type.value.title()} company")
+st.sidebar.caption(f"{company.name} ({company.ticker or 'n/a'}): {company.company_type.value.title()} company")
 
 _widget_scope = f"{data_source}:{company.ticker or company.name}"  # widgets reset to fresh defaults when the company changes
 
@@ -158,7 +158,7 @@ if _kd_estimate.interest_coverage_ratio is not None:
     st.sidebar.caption(
         f"Cost of debt default: synthetic **{_kd_estimate.synthetic_rating}** rating from "
         f"{_kd_estimate.interest_coverage_ratio:.1f}x interest coverage (EBIT/Interest, Damodaran spread table) "
-        f"+ risk-free rate — override if you know the company's actual borrowing rate."
+        f"+ risk-free rate. Override if you know the company's actual borrowing rate."
     )
 else:
     st.sidebar.caption("Cost of debt default: negligible interest expense reported, defaulted to the safest spread tier.")
@@ -174,7 +174,7 @@ exit_multiple = st.sidebar.number_input(
     "Exit multiple (x EBITDA, cross-check)", 1.0, 40.0, 14.0, 0.5, key=f"exit_mult_{_widget_scope}"
 )
 
-st.sidebar.caption("Any change above triggers a full model recalculation — nothing is cached across assumptions.")
+st.sidebar.caption("Any change above triggers a full model recalculation. Nothing is cached across assumptions.")
 
 # ------------------------------------------------------------ Base model --
 base_assumptions = build_default_assumptions(
@@ -248,7 +248,7 @@ with tabs[0]:
     else:
         if valuation.equity_bridge.equity_value < 0:
             st.error(
-                "Equity Value is negative — Enterprise Value plus cash does not cover debt, lease liabilities, "
+                "Equity Value is negative: Enterprise Value plus cash does not cover debt, lease liabilities, "
                 "minority interest, and preferred stock combined. See the Model Quality tab for details before "
                 "trusting the implied share price below."
             )
@@ -274,7 +274,7 @@ with tabs[0]:
         c8.markdown(ui_theme.kpi_card("Terminal EBITDA Margin", pct(forecast.years[-1].ebitda_margin), icon="percent"), unsafe_allow_html=True)
         c9.markdown(ui_theme.kpi_card("Terminal Value % of EV", pct(valuation.terminal_value_pct_of_ev), icon="percent"), unsafe_allow_html=True)
         if valuation.terminal_value_pct_of_ev > 0.90:
-            st.warning(f"Terminal value represents {pct(valuation.terminal_value_pct_of_ev)} of Enterprise Value — unusually high; the explicit forecast is contributing almost nothing to the valuation. Consider a longer forecast horizon or double-checking WACC and terminal growth.")
+            st.warning(f"Terminal value represents {pct(valuation.terminal_value_pct_of_ev)} of Enterprise Value, which is unusually high; the explicit forecast is contributing almost nothing to the valuation. Consider a longer forecast horizon or double-checking WACC and terminal growth.")
 
         st.write("")
         scenarios = run_all_scenarios(

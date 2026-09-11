@@ -135,6 +135,14 @@ def _portfolio_tab(user_key: str, enriched: list[dict]) -> None:
     )
 
     st.write("")
+    cluster_items = [{
+        "label": h["scheme_name"], "category": analysis.classify_asset_class(h["scheme_category"]),
+        "weight_pct": (h["value"] / total_value * 100) if total_value else 0.0,
+    } for h in enriched if h["value"]]
+    st.markdown(ui_theme.fund_cluster_html(cluster_items), unsafe_allow_html=True)
+    st.caption("Each star is one scheme, sized by weight and grouped with others of the same asset class. Hover for the exact number - the table below has the rest.")
+
+    st.write("")
     df = pd.DataFrame([{
         "Scheme": h["scheme_name"], "Category": h["scheme_category"], "Units": round(h["units"], 3),
         "Avg NAV": round(h["avg_nav"], 4),

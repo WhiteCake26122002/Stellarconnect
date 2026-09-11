@@ -322,7 +322,7 @@ def _write_historical_bs_sheet(ws: Worksheet, hist: HistoricalFinancials) -> Non
     _formula_row(ws, R["balance_check"], "Balance Check (Assets − (Liab.+Equity))", [f"={c(j)}{R['total_assets']}-{c(j)}{R['total_liab_equity']}" for j in range(n)], FORMAT_MONEY)
     for j in range(n):
         ws.cell(row=R["balance_check"], column=FIRST_DATA_COL + j).fill = CHECK_FILL
-    ws.cell(row=R["balance_check"] + 1, column=1, value="Should be ~0 for every year — confirms Assets = Liabilities + Equity ties out exactly.")
+    ws.cell(row=R["balance_check"] + 1, column=1, value="Should be ~0 for every year: confirms Assets = Liabilities + Equity ties out exactly.")
 
     _formula_row(ws, R["total_debt"], "Total Debt (ST + LT)", [f"={c(j)}{R['st_debt']}+{c(j)}{R['lt_debt']}" for j in range(n)], FORMAT_MONEY)
     _formula_row(ws, R["total_debt_leases"], "Total Debt & Leases", [f"={c(j)}{R['total_debt']}+{c(j)}{R['lease']}" for j in range(n)], FORMAT_MONEY)
@@ -514,7 +514,7 @@ def _write_forecast_fcff_sheet(
         header_row = 6
         wacc_ref = "$B$4"
     else:
-        _title(ws, "Forecast & FCFF — Base Case")
+        _title(ws, "Forecast & FCFF - Base Case")
         header_row = 3
         wacc_ref = base_wacc_ref
 
@@ -611,7 +611,7 @@ def _write_dcf_sheet(
     fcff_row, n_row, df_row, ebitda_row = fc_rows["fcff"], fc_rows["n"], fc_rows["df"], fc_rows["ebitda"]
 
     scenario_label = forecast_sheet_name.split("(")[-1].rstrip(")") if "(" in forecast_sheet_name else "Base"
-    _title(ws, f"Discounted Cash Flow — {scenario_label} Case")
+    _title(ws, f"Discounted Cash Flow - {scenario_label} Case")
 
     rows: dict[str, int] = {}
     r = 3
@@ -771,10 +771,10 @@ def _write_scenario_summary_sheet(ws: Worksheet, scenario_rows: dict[str, dict],
 
 
 def _write_sensitivity_sheet(ws: Worksheet, base_forecast_sheet: str, fc_rows: dict[str, int], table: WaccGrowthTable, driver_ranking: list[DriverImpact]) -> None:
-    _title(ws, "Sensitivity — Enterprise Value: WACC × Terminal Growth (Base Case)")
+    _title(ws, "Sensitivity - Enterprise Value: WACC × Terminal Growth (Base Case)")
     ws["A2"] = (
         "Fully formula-driven: re-discounts the Base Case's own explicit FCFF at each row's WACC, and grows "
-        "the final year's FCFF at each column's g for the terminal value — the same construction as the DCF (Base) tab."
+        "the final year's FCFF at each column's g for the terminal value, the same construction as the DCF (Base) tab."
     )
 
     n = fc_rows["n_periods"]
@@ -818,7 +818,7 @@ def _write_sensitivity_sheet(ws: Worksheet, base_forecast_sheet: str, fc_rows: d
                 cell.fill = CALC_FILL
 
     r = hdr_row + len(table.wacc_range) + 3
-    _section_banner(ws, r, "Ranked Valuation Drivers (EV swing %, full model re-run per shift — see Sources & Notes)", span_cols=2)
+    _section_banner(ws, r, "Ranked Valuation Drivers (EV swing %, full model re-run per shift; see Sources & Notes)", span_cols=2)
     _header_row(ws, r + 1, ["Driver", "EV Swing %"])
     for i, d in enumerate(driver_ranking, start=r + 2):
         ws.cell(row=i, column=1, value=d.driver_name)
@@ -835,7 +835,7 @@ def _write_sensitivity_sheet(ws: Worksheet, base_forecast_sheet: str, fc_rows: d
 
 def _write_exec_summary_sheet(ws: Worksheet, company: Company, wacc_rows: dict[str, int], integrity: IntegrityReport, driver_ranking: list[DriverImpact]) -> None:
     _title(
-        ws, f"{company.name} ({company.ticker or 'Private'}) — DCF Valuation",
+        ws, f"{company.name} ({company.ticker or 'Private'}) - DCF Valuation",
         subtitle=(
             f"FCFF / WACC Discounted Cash Flow Model  |  Currency: {company.currency} ({company.units})  |  "
             f"Industry: {company.industry or 'n/a'}  |  Country: {company.country or 'n/a'}"
@@ -858,7 +858,7 @@ def _write_exec_summary_sheet(ws: Worksheet, company: Company, wacc_rows: dict[s
         r += 1
 
     r += 1
-    _section_banner(ws, r, "Valuation Summary — Value per Share", span_cols=5)
+    _section_banner(ws, r, "Valuation Summary - Value per Share", span_cols=5)
     r += 1
     _header_row(ws, r, ["Scenario", "Value/Share", "Current Price", "Upside/(Downside)", "Terminal Growth"])
     summary_header_row = r
@@ -907,7 +907,7 @@ def _write_exec_summary_sheet(ws: Worksheet, company: Company, wacc_rows: dict[s
     r += 1
     score_tint = BULL_SOFT if integrity.score >= 80 else ("FEF3D9" if integrity.score >= 60 else BEAR_SOFT)
     score_ink = "166534" if integrity.score >= 80 else ("92600A" if integrity.score >= 60 else "991B1B")
-    _section_banner(ws, r, f"Model Integrity Score: {integrity.score}/{integrity.max_score}  —  {integrity.summary.split('—')[-1].strip()}", span_cols=5)
+    _section_banner(ws, r, f"Model Integrity Score: {integrity.score}/{integrity.max_score}  -  {integrity.band}", span_cols=5)
     ws.cell(row=r, column=1).fill = PatternFill("solid", fgColor=score_tint)
     ws.cell(row=r, column=1).font = Font(bold=True, color=score_ink, name="Calibri", size=11)
     for col in range(2, 6):
@@ -936,7 +936,7 @@ def _write_sources_notes_sheet(ws: Worksheet, ingestion_notes: list[str], ingest
         "Enterprise value is built as an unlevered Free Cash Flow to Firm (FCFF) DCF: FCFF = NOPAT + D&A "
         "− Capex − Change in NWC, discounted at WACC (CAPM cost of equity + after-tax cost of debt, weighted "
         "by market value of equity and debt).",
-        "Terminal value uses the Gordon Growth perpetuity — Terminal FCFF / (WACC − g) — discounted back at "
+        "Terminal value uses the Gordon Growth perpetuity, Terminal FCFF / (WACC − g), discounted back at "
         "the same WACC and same convention as the explicit-period cash flows; an EBITDA exit-multiple value "
         "is shown alongside as a cross-check only, not used in the primary Enterprise Value.",
         "COGS/operating-expense line items from automated data sources are not always independently broken "
@@ -962,7 +962,7 @@ def _write_sources_notes_sheet(ws: Worksheet, ingestion_notes: list[str], ingest
     _section_banner(ws, r, "Data Ingestion Notes", span_cols=1)
     r += 1
     if not ingestion_notes and not ingestion_warnings:
-        ws.cell(row=r, column=1, value="This model was built from a sample company or manually entered data — no automated data-source notes apply.")
+        ws.cell(row=r, column=1, value="This model was built from a sample company or manually entered data: no automated data-source notes apply.")
         r += 1
     for note in ingestion_notes:
         ws.cell(row=r, column=1, value=f"Note: {note}")

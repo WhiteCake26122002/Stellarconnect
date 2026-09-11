@@ -41,7 +41,7 @@ def render_custom_company_form() -> tuple[Company | None, HistoricalFinancials |
     st.header("Enter Your Company's Financials")
     st.caption(
         "Type your company's historical statements below (any currency, consistent units e.g. all in millions). "
-        "Leave a cell at 0 if a line item does not apply. Nothing is uploaded anywhere — this stays in your browser session."
+        "Leave a cell at 0 if a line item does not apply. Nothing is uploaded anywhere: this stays in your browser session."
     )
 
     c1, c2, c3 = st.columns(3)
@@ -68,7 +68,7 @@ def render_custom_company_form() -> tuple[Company | None, HistoricalFinancials |
             st.caption("Share price and diluted shares are optional, but without both, per-share value and market-based WACC weights can't be computed.")
     else:
         target_equity_weight = st.slider(
-            "Target Equity Weight in Capital Structure (for WACC — no market price exists for a private company)",
+            "Target Equity Weight in Capital Structure (for WACC; no market price exists for a private company)",
             0, 100, 70, 1, format="%d%%",
         ) / 100
 
@@ -177,7 +177,7 @@ def build_wacc_inputs_for_company(
     beta_rationale = (
         "User-provided beta."
         if company.company_type == CompanyType.PUBLIC
-        else "User-provided comparable-company beta estimate — no public market beta exists for a private company."
+        else "User-provided comparable-company beta estimate; no public market beta exists for a private company."
     )
 
     if company.company_type == CompanyType.PUBLIC and company.current_share_price and company.diluted_shares_outstanding:
@@ -213,13 +213,13 @@ def render_live_company_form() -> tuple[Company | None, HistoricalFinancials | N
     Automated data-entry path: user types a ticker, financials are fetched
     from Yahoo Finance, and WACC inputs (sector beta, country ERP, country
     tax rate) are auto-matched from the bundled Damodaran reference data.
-    Nothing here is fabricated — every value traces back to Yahoo Finance or
+    Nothing here is fabricated: every value traces back to Yahoo Finance or
     the Damodaran workbooks, and match confidence is always shown so a poor
     auto-match can be spotted and overridden.
     """
     st.header("Search Live Company Data")
     st.caption(
-        "Type a ticker with its Yahoo Finance exchange suffix — e.g. TCS.NS, RELIANCE.NS, INFY.NS (NSE), "
+        "Type a ticker with its Yahoo Finance exchange suffix, e.g. TCS.NS, RELIANCE.NS, INFY.NS (NSE), "
         "or AAPL (US, no suffix). Financials are fetched automatically; sector beta / country equity risk "
         "premium / tax rate are then auto-matched against the bundled Damodaran (NYU Stern) reference data."
     )
@@ -240,7 +240,7 @@ def render_live_company_form() -> tuple[Company | None, HistoricalFinancials | N
         return None, None, None, None
 
     company, hist = result.company, result.historicals
-    st.success(f"Loaded **{company.name}** ({company.ticker}) — {company.industry or 'industry n/a'}, {company.country or 'country n/a'}")
+    st.success(f"Loaded **{company.name}** ({company.ticker}): {company.industry or 'industry n/a'}, {company.country or 'country n/a'}")
     for warning in result.warnings:
         st.warning(f"Data quality: {warning}")
     for note in result.notes:
@@ -258,7 +258,7 @@ def render_live_company_form() -> tuple[Company | None, HistoricalFinancials | N
     elif company.industry:
         st.caption(
             "Sector-beta auto-matching is only available for India-listed companies in this version "
-            "(the bundled reference data is India-specific) — enter beta manually in the sidebar."
+            "(the bundled reference data is India-specific); enter beta manually in the sidebar."
         )
 
     country_risk: CountryRiskData | None = None

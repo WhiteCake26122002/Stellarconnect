@@ -1,40 +1,56 @@
 """
-Shared visual design system for the Streamlit UI: one dark color palette
-(black + deep indigo, per the brand colors requested), one Plotly layout
-template, one CSS injection - so every tab/chart looks like part of the same
-product instead of an assortment of default-styled widgets.
+Shared visual design system for the Streamlit UI: a deep-space palette (void
+black, violet/cyan nebula accent) with three cosmic metaphors, one for each
+mode - a gravity well for DCF valuation, an orbit system for paper trading
+holdings, a star cluster for mutual fund allocation - plus one Plotly layout
+template and one CSS injection, so every tab/chart looks like part of the
+same product instead of an assortment of default-styled widgets.
 """
 from __future__ import annotations
 
+import hashlib
+import math
+
 import streamlit as st
 
-# ---- Brand palette: black + deep indigo, as specified ------------------
-BLACK = "#000000"
-NAVY = "#160D70"
-NAVY_LIGHT = "#2A1FB0"  # a lighter tint of NAVY, used only where a fill needs to read against a NAVY/BLACK backdrop
-NAVY_SOFT = "#221867"   # muted panel/border tint between BLACK and NAVY
+# ---- Brand palette: deep space void + a violet/cyan nebula accent ---------
+BLACK = "#06060C"        # void - base canvas
+NAVY = "#0E0F1E"          # panel - card/rail surfaces
+NAVY_LIGHT = "#A684FF"    # violet - primary accent (was a flat indigo)
+NAVY_SOFT = "#26284A"     # line/border, between void and panel
 
-INK = "#FFFFFF"
-MUTED = "#9C97D6"        # light lavender-gray, muted text against black/navy
+CYAN = "#6FD9EA"          # secondary accent - hover, benchmarks, information
+PANEL_RAISED = "#13152B"  # nested surfaces: chips, tooltip bodies
+
+INK = "#EEF0FB"
+MUTED = "#9A9ECB"         # lavender-gray, muted text against void/panel
+MUTED_2 = "#5D6191"       # a step quieter still - eyebrow labels, captions
 BORDER = NAVY_SOFT
 PANEL = NAVY
 ACCENT = NAVY_LIGHT
 
-# Semantic colors (valuation direction) - intentionally NOT part of the 2-color
-# brand palette, since red/green here carries meaning (over/under-valued) that
-# the requested reference design itself uses regardless of brand colors.
-BEAR = "#EF4444"
-BEAR_SOFT = "rgba(239,68,68,0.15)"
-BASE_C = "#8B85E8"
-BULL = "#22C55E"
-BULL_SOFT = "rgba(34,197,94,0.15)"
-WARN = "#F59E0B"
-WARN_SOFT = "rgba(245,158,11,0.15)"
+# Semantic colors (valuation direction) - intentionally not part of the
+# void/violet/cyan brand pair, since gain/loss here carries meaning that has
+# to read correctly regardless of the rest of the palette.
+BEAR = "#FF8A76"
+BEAR_SOFT = "rgba(255,138,118,0.15)"
+BASE_C = CYAN
+BULL = "#5FE0A8"
+BULL_SOFT = "rgba(95,224,168,0.15)"
+WARN = "#ECC971"
+WARN_SOFT = "rgba(236,201,113,0.15)"
 
 HISTORICAL = MUTED
 FORECAST = NAVY_LIGHT
 
 SCENARIO_COLORS = {"Bear Case": BEAR, "Base Case": BASE_C, "Bull Case": BULL}
+
+# Category -> color, reused by both the fund star cluster and any legend
+# drawn next to it, so a category is always the same color everywhere.
+CATEGORY_COLORS = {
+    "Equity": NAVY_LIGHT, "Debt": WARN, "Hybrid": "#FFFFFF",
+    "Index/ETF": CYAN, "Other": MUTED,
+}
 
 
 def _flatten_html(html: str) -> str:
@@ -46,6 +62,14 @@ def _flatten_html(html: str) -> str:
     renders as literal text (e.g. a stray "</div>") instead of markup.
     """
     return "\n".join(line.strip() for line in html.strip().split("\n"))
+
+
+def _stable_unit(*parts: str) -> float:
+    """A pseudo-random float in [0, 1), stable across reruns for the same input -
+    used to jitter star/planet positions without them drifting on every rerun
+    the way Python's own (unseeded) random module would."""
+    digest = hashlib.sha256("|".join(parts).encode("utf-8")).hexdigest()
+    return int(digest[:8], 16) / 0xFFFFFFFF
 
 
 # Small, hand-picked Lucide-style icon set (MIT licensed, stroke-based, 24x24 viewBox) for KPI
@@ -103,7 +127,7 @@ def inject_css() -> None:
         """
         <link rel="preconnect" href="https://fonts.googleapis.com">
         <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-        <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+        <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
         """,
         unsafe_allow_html=True,
     )
@@ -111,14 +135,32 @@ def inject_css() -> None:
         f"""
         <style>
         .stApp {{
-            font-family: 'Inter', -apple-system, "Segoe UI", Roboto, sans-serif;
-            background: {BLACK};
+            font-family: 'IBM Plex Sans', -apple-system, "Segoe UI", Roboto, sans-serif;
+            background:
+                radial-gradient(1100px 650px at 82% -8%, rgba(166,132,255,.10), transparent 60%),
+                radial-gradient(850px 550px at 4% 106%, rgba(111,217,234,.07), transparent 60%),
+                radial-gradient(1.4px 1.4px at 12% 18%, #fff 100%, transparent 100%),
+                radial-gradient(1.2px 1.2px at 26% 64%, #cfd3ff 100%, transparent 100%),
+                radial-gradient(1.6px 1.6px at 41% 29%, #fff 100%, transparent 100%),
+                radial-gradient(1.1px 1.1px at 58% 82%, #cfd3ff 100%, transparent 100%),
+                radial-gradient(1.4px 1.4px at 68% 12%, #fff 100%, transparent 100%),
+                radial-gradient(1.2px 1.2px at 77% 47%, #cfd3ff 100%, transparent 100%),
+                radial-gradient(1.6px 1.6px at 88% 71%, #fff 100%, transparent 100%),
+                radial-gradient(1.1px 1.1px at 95% 24%, #cfd3ff 100%, transparent 100%),
+                radial-gradient(1.3px 1.3px at 5% 88%, #fff 100%, transparent 100%),
+                radial-gradient(1.2px 1.2px at 34% 8%, #cfd3ff 100%, transparent 100%),
+                {BLACK};
+            background-attachment: fixed;
+        }}
+        h1, h2, h3, h4, h5, h6 {{
+            font-family: 'Space Grotesk', 'IBM Plex Sans', sans-serif !important;
         }}
 
         /* Financial figures (metrics, tables) hold a fixed digit width so a refreshing
            number never jitters or reflows its neighbors. */
         div[data-testid="stMetricValue"], div[data-testid="stDataFrame"] {{
             font-variant-numeric: tabular-nums;
+            font-family: 'IBM Plex Mono', monospace;
         }}
 
         /* A visible, on-brand focus ring for keyboard navigation - browsers otherwise fall
@@ -133,8 +175,7 @@ def inject_css() -> None:
         div[data-testid="stMetric"] {{
             background: {PANEL};
             border: 1px solid {BORDER};
-            border-left: 3px solid {NAVY_LIGHT};
-            border-radius: 10px;
+            border-radius: 12px;
             padding: 0.9rem 1rem 0.7rem 1rem;
         }}
         div[data-testid="stMetricLabel"] {{
@@ -158,8 +199,8 @@ def inject_css() -> None:
             transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
         }}
         .kpi-card:hover {{
-            border-color: rgba(255,255,255,0.28);
-            box-shadow: 0 8px 22px rgba(0,0,0,0.35);
+            border-color: {NAVY_LIGHT}88;
+            box-shadow: 0 10px 26px -8px {NAVY_LIGHT}55;
             transform: translateY(-3px);
         }}
         .kpi-top {{ display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.9rem; }}
@@ -171,6 +212,7 @@ def inject_css() -> None:
         .kpi-icon svg {{ width: 20px; height: 20px; }}
         .kpi-badge {{
             display: inline-flex; align-items: center; gap: 3px;
+            font-family: 'IBM Plex Mono', monospace;
             font-size: 0.74rem; font-weight: 700;
             padding: 3px 8px; border-radius: 999px; white-space: nowrap;
         }}
@@ -178,7 +220,8 @@ def inject_css() -> None:
         .kpi-badge.up {{ background: {BULL_SOFT}; color: {BULL}; }}
         .kpi-badge.down {{ background: {BEAR_SOFT}; color: {BEAR}; }}
         .kpi-value {{
-            font-size: 1.7rem; font-weight: 800; color: {INK};
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 1.6rem; font-weight: 700; color: {INK};
             margin-bottom: 0.15rem; letter-spacing: -0.01em;
             font-variant-numeric: tabular-nums;
         }}
@@ -192,8 +235,8 @@ def inject_css() -> None:
         h1, h2, h3, h4, p, span, label, .stMarkdown {{
             color: {INK};
         }}
-        h1 {{ font-weight: 700 !important; letter-spacing: -0.01em; }}
-        h2, h3 {{ font-weight: 650 !important; }}
+        h1 {{ font-weight: 600 !important; letter-spacing: -0.01em; }}
+        h2, h3 {{ font-weight: 600 !important; }}
 
         /* ---- Containers / cards ------------------------------------------ */
         div[data-testid="stVerticalBlockBorderWrapper"] {{
@@ -205,8 +248,8 @@ def inject_css() -> None:
         /* A card that reacts to the cursor reads as interactive everywhere in the app, not
            just the pages that happened to define this locally. */
         div[data-testid="stVerticalBlockBorderWrapper"]:hover {{
-            border-color: rgba(255,255,255,0.28) !important;
-            box-shadow: 0 8px 22px rgba(0,0,0,0.35);
+            border-color: {NAVY_LIGHT}88 !important;
+            box-shadow: 0 10px 26px -8px {NAVY_LIGHT}55;
         }}
         section[data-testid="stSidebar"] div[data-testid="stVerticalBlockBorderWrapper"]:hover {{
             transform: translateX(2px);
@@ -221,8 +264,9 @@ def inject_css() -> None:
 
         /* ---- Tabs ---------------------------------------------------- */
         [data-testid="stTab"] {{
-            font-weight: 600;
-            font-size: 0.92rem;
+            font-family: 'IBM Plex Mono', monospace;
+            font-weight: 500;
+            font-size: 0.86rem;
             color: {MUTED} !important;
             transition: color 0.15s ease;
         }}
@@ -236,8 +280,9 @@ def inject_css() -> None:
            data-testid) - the moving underline beneath the active tab. */
         .react-aria-SelectionIndicator {{
             background-color: {NAVY_LIGHT} !important;
-            height: 3px !important;
+            height: 2px !important;
             border-radius: 2px;
+            box-shadow: 0 0 6px {NAVY_LIGHT};
         }}
 
         /* ---- Radio groups: a segmented-pill look instead of bare dots -------- */
@@ -252,6 +297,28 @@ def inject_css() -> None:
         }}
         [data-testid="stRadioOption"][data-selected="true"] {{
             background: {NAVY_LIGHT}2E;
+        }}
+        /* The Mode switcher gets a small glowing "body" beside each option - a black hole for
+           DCF, a warm star for Paper Trading, a cool star for Mutual Funds - so the sidebar
+           itself hints at the cosmic language before a user opens any module. */
+        [data-testid="stRadioGroup"][aria-label="Choose a tool"] [data-testid="stRadioOption"] {{
+            display: flex; align-items: center;
+        }}
+        [data-testid="stRadioGroup"][aria-label="Choose a tool"] [data-testid="stRadioOption"]::after {{
+            content: ''; display: inline-block; width: 13px; height: 13px; margin-left: 9px;
+            border-radius: 50%; flex-shrink: 0;
+        }}
+        [data-testid="stRadioGroup"][aria-label="Choose a tool"] [data-testid="stRadioOption"]:nth-of-type(1)::after {{
+            background: radial-gradient(circle at 38% 32%, {NAVY_LIGHT}, #0a0918 72%);
+            box-shadow: 0 0 7px {NAVY_LIGHT}aa;
+        }}
+        [data-testid="stRadioGroup"][aria-label="Choose a tool"] [data-testid="stRadioOption"]:nth-of-type(2)::after {{
+            background: radial-gradient(circle at 35% 30%, #fff6d8, {WARN} 62%);
+            box-shadow: 0 0 7px {WARN}aa;
+        }}
+        [data-testid="stRadioGroup"][aria-label="Choose a tool"] [data-testid="stRadioOption"]:nth-of-type(3)::after {{
+            background: radial-gradient(circle at 35% 30%, #fff, {CYAN} 70%);
+            box-shadow: 0 0 7px {CYAN}aa;
         }}
 
         /* ---- Text / number / select inputs: a brand focus glow --------------- */
@@ -286,10 +353,11 @@ def inject_css() -> None:
             margin-top: 0.6rem;
         }}
         section[data-testid="stSidebar"] h3 {{
-            font-size: 0.85rem !important;
+            font-family: 'IBM Plex Mono', monospace !important;
+            font-size: 0.78rem !important;
             color: {MUTED};
             text-transform: uppercase;
-            letter-spacing: 0.03em;
+            letter-spacing: 0.05em;
             margin-top: 1.1rem;
         }}
 
@@ -326,6 +394,7 @@ def inject_css() -> None:
         button[data-testid="stBaseButton-primary"] {{
             background: {NAVY_LIGHT} !important;
             border: 1px solid {NAVY_LIGHT} !important;
+            color: #0C0A1A !important;
             box-shadow: 0 1px 2px rgba(0,0,0,0.35);
             transition: transform 0.15s ease, box-shadow 0.15s ease, filter 0.15s ease;
         }}
@@ -348,16 +417,27 @@ def inject_css() -> None:
             background: {BLACK} !important;
             border-color: {BORDER} !important;
             color: {MUTED} !important;
+            font-family: 'IBM Plex Mono', monospace;
             transition: background-color 0.15s ease, color 0.15s ease;
         }}
         [data-testid="stButtonGroup"] button[data-variant="segmented_control"][aria-checked="true"] {{
             background: {NAVY_LIGHT} !important;
-            color: {INK} !important;
+            color: #0C0A1A !important;
         }}
 
-        /* ---- Alerts ---------------------------------------------------- */
-        div[data-testid="stAlert"] {{
-            border-radius: 10px;
+        /* ---- Cosmic component primitives (gravity well, orbit, cluster) -------- */
+        @keyframes dcf-spin {{ to {{ transform: rotate(360deg); }} }}
+        @keyframes dcf-breathe {{ 0%, 100% {{ opacity: .55; }} 50% {{ opacity: 1; }} }}
+        @keyframes dcf-pull-in {{
+            0% {{ transform: translate(calc(-50% + var(--tx)), calc(-50% + var(--ty))); opacity: 0; }}
+            20% {{ opacity: 1; }} 100% {{ transform: translate(-50%, -50%); opacity: 0; }}
+        }}
+        @keyframes dcf-push-out {{
+            0% {{ transform: translate(-50%, -50%); opacity: 0; }}
+            20% {{ opacity: 1; }} 100% {{ transform: translate(calc(-50% + var(--tx)), calc(-50% + var(--ty))); opacity: 0; }}
+        }}
+        @media (prefers-reduced-motion: reduce) {{
+            .well-ring, .orbit-ring, .osun, .pulse, .node-halo {{ animation: none !important; }}
         }}
         </style>
         """,
@@ -401,86 +481,289 @@ def intrinsic_value_card(
     website: str = "",
 ) -> str:
     """
-    Builds the "Intrinsic Value vs. Price" comparison card as raw HTML: a big
-    headline number, an over/under-valuation badge, and two bars (Intrinsic
-    Value / Price) where the gap between them is hatched in green (undervalued,
-    intrinsic > price) or red (overvalued, intrinsic < price).
+    Builds the "Intrinsic Value vs. Price" comparison as a gravity well: the
+    model's fair value sits at the center like a black hole's core, and the
+    current price is a marker whose distance from that center encodes the
+    size of the mispricing - pulled inward (green) when undervalued, flung
+    outward (red) when overvalued. The literal numbers sit beside it; the
+    well is a second, faster read of the same comparison, never the only one.
     """
     initial = (ticker or company_name or "?")[:1].upper()
     title = f"{ticker or company_name} Intrinsic Value"
     avatar = _avatar_html(website, initial)
 
     if intrinsic_value is None or current_price is None or current_price == 0:
-        return _flatten_html(
-            f'<div class="iv-card"><div class="iv-top">'
-            f'{avatar}<div class="iv-title">{title}</div></div>'
-            f'<div class="iv-bignum">n/a</div>'
-            f'<div class="iv-note">Not enough data to compare intrinsic value to market price for this scenario.</div>'
-            f"</div>"
-        )
+        return _flatten_html(f"""
+        <div class="well-card">
+            <div class="well-top"><div class="well-top-left">{avatar}<div class="well-title">{title}</div></div></div>
+            <div class="well-empty">Not enough data to compare intrinsic value to market price for this scenario.</div>
+        </div>
+        <style>
+        .well-card {{ background: {BLACK}; border: 1px solid {BORDER}; border-radius: 16px; padding: 20px 22px; }}
+        .well-top {{ display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }}
+        .well-top-left {{ display: flex; align-items: center; gap: 10px; }}
+        .well-title {{ font-size: 0.92rem; font-weight: 600; color: {MUTED}; }}
+        .well-empty {{ font-size: 0.85rem; color: {MUTED}; }}
+        </style>
+        """)
 
     pct = intrinsic_value / current_price - 1
     undervalued = pct >= 0
     badge_class = "under" if undervalued else "over"
     badge_text = f"{'UNDERVALUATION' if undervalued else 'OVERVALUATION'} {abs(pct):.0%}"
+    marker_class = "gain" if undervalued else "loss"
 
-    max_val = max(intrinsic_value, current_price, 1e-9)
-    min_val = min(intrinsic_value, current_price)
-    iv_pct = max(intrinsic_value, 0) / max_val * 100
-    price_pct = max(current_price, 0) / max_val * 100
-    gap_lo_pct = max(min_val, 0) / max_val * 100
-    hatch_color = "green" if undervalued else "red"
-
-    iv_hatch = f'<div class="iv-hatch {hatch_color}" style="left:{gap_lo_pct:.2f}%; width:{max(iv_pct - gap_lo_pct, 0):.2f}%;"></div>' if undervalued else ""
-    price_hatch = f'<div class="iv-hatch {hatch_color}" style="left:{gap_lo_pct:.2f}%; width:{max(price_pct - gap_lo_pct, 0):.2f}%;"></div>' if not undervalued else ""
+    # Marker distance from center = magnitude of the mispricing (capped so an extreme
+    # scenario still lands inside the outer ring); angle is fixed, matching the design
+    # system's reference gravity well.
+    magnitude = min(abs(pct), 1.0)
+    radius_frac = 0.20 + magnitude * 0.64
+    cx = cy = 150
+    radius = 128
+    angle = math.radians(-50)
+    mx = round(cx + radius * radius_frac * math.cos(angle))
+    my = round(cy + radius * radius_frac * math.sin(angle))
+    tx, ty = mx - cx, my - cy
 
     return _flatten_html(f"""
-    <div class="iv-card">
-        <div class="iv-top">
-            <div class="iv-top-left">
-                {avatar}
-                <div class="iv-title">{title}</div>
-            </div>
-            <div class="iv-badge {badge_class}">{badge_text}</div>
+    <div class="well-card">
+        <div class="well-top">
+            <div class="well-top-left">{avatar}<div class="well-title">{title}</div></div>
+            <div class="well-badge {badge_class}">{badge_text}</div>
         </div>
-        <div class="iv-bignum">{currency_symbol}{intrinsic_value:,.2f}</div>
-        <div class="iv-bar-row">
-            <div class="iv-bar-track">
-                <div class="iv-bar-fill navy" style="width:{iv_pct:.2f}%;"><span>Intrinsic Value</span></div>
-                {iv_hatch}
+        <div class="well-body">
+            <div class="well">
+                <div class="well-ring r1"></div><div class="well-ring r2"></div><div class="well-ring r3"></div>
+                <div class="well-marker {marker_class}" style="left:{mx}px;top:{my}px;"></div>
+                <div class="well-marker-tag" style="left:{mx}px;top:{my}px;">{currency_symbol}{current_price:,.2f} now</div>
+                <div class="well-pulse {marker_class}" style="left:{cx}px;top:{cy}px;--tx:{tx}px;--ty:{ty}px;"></div>
+                <div class="well-core">
+                    <div class="well-core-cv">Intrinsic Value</div>
+                    <div class="well-core-val">{currency_symbol}{intrinsic_value:,.2f}</div>
+                </div>
             </div>
-        </div>
-        <div class="iv-bar-row">
-            <div class="iv-bar-track">
-                <div class="iv-bar-fill gray" style="width:{price_pct:.2f}%;"><span>Price&nbsp;&nbsp;{currency_symbol}{current_price:,.2f}</span></div>
-                {price_hatch}
+            <div class="well-side">
+                <div class="well-verdict">
+                    A model value of <b>{currency_symbol}{intrinsic_value:,.2f}</b> against a
+                    <b>{currency_symbol}{current_price:,.2f}</b> market price is a
+                    <b class="{marker_class}">{abs(pct):.1%}</b> {'undervaluation' if undervalued else 'overvaluation'} -
+                    the marker's distance from center is that gap; color and pull direction show which way it resolves.
+                </div>
             </div>
         </div>
     </div>
     <style>
-    .iv-card {{ background: {BLACK}; border: 1px solid {BORDER}; border-radius: 14px; padding: 18px 20px; }}
-    .iv-top {{ display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; }}
-    .iv-top-left {{ display: flex; align-items: center; gap: 10px; }}
-    .iv-avatar {{ width: 30px; height: 30px; border-radius: 50%; background: {NAVY}; border: 1px solid {NAVY_LIGHT};
-                  display: flex; align-items: center; justify-content: center; font-weight: 700; color: {INK}; font-size: 0.82rem;
-                  overflow: hidden; flex-shrink: 0; }}
-    .iv-avatar-logo {{ background: #FFFFFF; padding: 5px; box-sizing: border-box; }}
-    .iv-avatar-logo img {{ width: 100%; height: 100%; object-fit: contain; }}
-    .iv-title {{ font-size: 0.92rem; font-weight: 600; color: {MUTED}; }}
-    .iv-badge {{ padding: 5px 11px; border-radius: 6px; font-size: 0.7rem; font-weight: 700; letter-spacing: 0.02em; white-space: nowrap; }}
-    .iv-badge.under {{ background: {BULL}; color: #04170A; }}
-    .iv-badge.over {{ background: {BEAR}; color: #240404; }}
-    .iv-bignum {{ font-size: 2.1rem; font-weight: 800; color: {INK}; margin-bottom: 16px; }}
-    .iv-bar-row {{ margin-bottom: 10px; }}
-    .iv-bar-track {{ position: relative; height: 36px; border-radius: 8px; background: rgba(255,255,255,0.05); overflow: hidden; }}
-    .iv-bar-fill {{ position: absolute; top: 0; left: 0; height: 100%; border-radius: 8px; display: flex; align-items: center; padding-left: 12px; }}
-    .iv-bar-fill span {{ font-size: 0.76rem; font-weight: 600; color: {INK}; white-space: nowrap; }}
-    .iv-bar-fill.navy {{ background: {NAVY_LIGHT}; }}
-    .iv-bar-fill.gray {{ background: #4B5563; }}
-    .iv-hatch {{ position: absolute; top: 0; height: 100%; opacity: 0.9; }}
-    .iv-hatch.green {{ background-image: repeating-linear-gradient(45deg, {BULL} 0px, {BULL} 3px, transparent 3px, transparent 8px); }}
-    .iv-hatch.red {{ background-image: repeating-linear-gradient(45deg, {BEAR} 0px, {BEAR} 3px, transparent 3px, transparent 8px); }}
-    .iv-note {{ font-size: 0.82rem; color: {MUTED}; }}
+    .well-card {{ background: {BLACK}; border: 1px solid {BORDER}; border-radius: 16px; padding: 22px 24px 20px; }}
+    .well-top {{ display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }}
+    .well-top-left {{ display: flex; align-items: center; gap: 10px; }}
+    .well-title {{ font-size: 0.92rem; font-weight: 600; color: {MUTED}; }}
+    .well-badge {{ padding: 5px 11px; border-radius: 6px; font-family: 'IBM Plex Mono', monospace;
+        font-size: 0.7rem; font-weight: 700; letter-spacing: 0.02em; white-space: nowrap; }}
+    .well-badge.under {{ background: {BULL}; color: #04170A; }}
+    .well-badge.over {{ background: {BEAR}; color: #2A0805; }}
+    .well-body {{ display: flex; gap: 26px; align-items: center; }}
+    .well {{ position: relative; width: 300px; height: 300px; flex-shrink: 0; }}
+    .well-ring {{ position: absolute; border-radius: 50%; border: 1px solid {BORDER}; }}
+    .well-ring.r1 {{ inset: 0; }} .well-ring.r2 {{ inset: 14%; }} .well-ring.r3 {{ inset: 28%; border-color: {NAVY_SOFT}; }}
+    .well-core {{ position: absolute; inset: 42%; border-radius: 50%;
+        background: radial-gradient(circle at 38% 32%, #241f42, #0a0918 68%);
+        box-shadow: 0 0 0 1px {NAVY_LIGHT}55, 0 0 30px 7px {NAVY_LIGHT}40, inset 0 0 16px rgba(0,0,0,.7);
+        display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; }}
+    .well-core-cv {{ font-family: 'IBM Plex Mono', monospace; font-size: 9px; color: {MUTED};
+        letter-spacing: 0.06em; text-transform: uppercase; }}
+    .well-core-val {{ font-family: 'IBM Plex Mono', monospace; font-weight: 700; font-size: 16px; margin-top: 3px; color: {INK}; }}
+    .well-marker {{ position: absolute; width: 15px; height: 15px; border-radius: 50%; transform: translate(-50%, -50%); z-index: 3; }}
+    .well-marker.gain {{ background: {BULL}; box-shadow: 0 0 10px {BULL}; }}
+    .well-marker.loss {{ background: {BEAR}; box-shadow: 0 0 10px {BEAR}; }}
+    .well-marker-tag {{ position: absolute; transform: translate(-50%, -140%); white-space: nowrap;
+        font-family: 'IBM Plex Mono', monospace; font-size: 9.5px; padding: 3px 7px; border-radius: 6px;
+        background: {PANEL_RAISED}; border: 1px solid {BORDER}; color: {MUTED}; z-index: 3; }}
+    .well-pulse {{ position: absolute; width: 8px; height: 8px; border-radius: 50%; transform: translate(-50%, -50%); z-index: 2; }}
+    .well-pulse.gain {{ background: {BULL}; box-shadow: 0 0 8px {BULL}; animation: dcf-pull-in 2.6s ease-in-out infinite; }}
+    .well-pulse.loss {{ background: {BEAR}; box-shadow: 0 0 8px {BEAR}; animation: dcf-push-out 2.6s ease-in-out infinite; }}
+    .well-side {{ flex: 1; }}
+    .well-verdict {{ padding: 14px 16px; border-radius: 10px; background: {PANEL_RAISED}; border: 1px solid {BORDER};
+        font-size: 0.85rem; color: {MUTED}; line-height: 1.6; }}
+    .well-verdict b {{ font-family: 'IBM Plex Mono', monospace; color: {INK}; }}
+    .well-verdict b.gain {{ color: {BULL}; }} .well-verdict b.loss {{ color: {BEAR}; }}
+    </style>
+    """)
+
+
+def orbit_holdings_html(items: list[dict], center_label: str, center_value: str) -> str:
+    """
+    Renders a portfolio's holdings as planets orbiting a center body (cash, or
+    the account itself): each item is one orbit, sized by weight, colored and
+    hover-tooltipped with its own return. `items` is a list of dicts with
+    keys `label`, `sublabel` (shown in the tooltip), `weight_pct` (0-100),
+    and `return_pct` (signed; drives color).
+
+    Purely a second, faster read of the same holdings a table already lists
+    in full below it - nothing here is the only place a number appears.
+    """
+    if not items:
+        return _flatten_html(f"""
+        <div class="orbit-card"><div class="orbit-empty">No positions yet - once you hold something,
+        it shows up here in orbit.</div></div>
+        <style>.orbit-card {{ background: {NAVY}; border: 1px solid {BORDER}; border-radius: 16px; padding: 22px 24px; }}
+        .orbit-empty {{ font-size: 0.85rem; color: {MUTED}; }}</style>
+        """)
+
+    rings = [96, 180, 266]
+    ring_duration = [9, 15, 24]
+    by_ring: list[list[dict]] = [[], [], []]
+    for i, item in enumerate(items):
+        by_ring[i % 3].append(item)
+
+    max_weight = max((it["weight_pct"] for it in items), default=1.0) or 1.0
+    planet_html = []
+    for ring_idx, ring_items in enumerate(by_ring):
+        count = len(ring_items)
+        for j, item in enumerate(ring_items):
+            phase = _stable_unit("orbit", item["label"]) * 360
+            angle_deg = phase + (360 / count) * j if count else phase
+            size = 9 + round((item["weight_pct"] / max_weight) * 13)
+            gain = item["return_pct"] >= 0
+            color_cls = "gain" if gain else "loss"
+            duration = ring_duration[ring_idx]
+            delay = -(_stable_unit("delay", item["label"]) * duration)
+            planet_html.append(_flatten_html(f"""
+            <div class="orbit-ring o{ring_idx} spin" style="width:{rings[ring_idx]}px;height:{rings[ring_idx]}px;
+                animation-duration:{duration}s; animation-delay:{delay:.2f}s; transform:translate(-50%,-50%) rotate({angle_deg:.0f}deg);">
+                <div class="planet {color_cls}" style="width:{size}px;height:{size}px;margin-left:-{size/2:.0f}px;margin-top:-{size/2:.0f}px;">
+                    <div class="planet-tip">
+                        <div class="planet-tip-name">{item['label']}</div>
+                        <div class="planet-tip-sub">{item['sublabel']}</div>
+                        <span class="planet-tip-return {color_cls}">{'+' if gain else ''}{item['return_pct']:.1f}%</span>
+                    </div>
+                </div>
+            </div>
+            """))
+
+    return _flatten_html(f"""
+    <div class="orbit-card">
+        <div class="orbit-zone">
+            <div class="orbit-ring static" style="width:{rings[0]}px;height:{rings[0]}px;"></div>
+            <div class="orbit-ring static" style="width:{rings[1]}px;height:{rings[1]}px;"></div>
+            <div class="orbit-ring static" style="width:{rings[2]}px;height:{rings[2]}px;"></div>
+            <div class="orbit-sun">{center_label}<br>{center_value}</div>
+            {"".join(planet_html)}
+        </div>
+    </div>
+    <style>
+    .orbit-card {{ background: {NAVY}; border: 1px solid {BORDER}; border-radius: 16px; padding: 20px; }}
+    .orbit-zone {{ position: relative; width: 100%; height: 300px; }}
+    .orbit-ring {{ position: absolute; top: 50%; left: 50%; border-radius: 50%; border: 1px solid {BORDER}; }}
+    .orbit-ring.static {{ transform: translate(-50%, -50%); }}
+    .orbit-ring.spin {{ border-color: transparent; animation-name: dcf-spin; animation-timing-function: linear;
+        animation-iteration-count: infinite; }}
+    .orbit-sun {{ position: absolute; top: 50%; left: 50%; width: 52px; height: 52px; border-radius: 50%;
+        transform: translate(-50%, -50%); background: radial-gradient(circle at 38% 32%, #fff6d8, {WARN} 62%);
+        box-shadow: 0 0 26px 6px {WARN}88; display: flex; align-items: center; justify-content: center;
+        font-family: 'IBM Plex Mono', monospace; font-size: 9px; color: #231a02; font-weight: 700;
+        text-align: center; line-height: 1.15; }}
+    .planet {{ position: absolute; top: 0; left: 50%; border-radius: 50%; cursor: default; }}
+    .planet.gain {{ background: {BULL}; box-shadow: 0 0 10px {BULL}; }}
+    .planet.loss {{ background: {BEAR}; box-shadow: 0 0 10px {BEAR}; }}
+    .planet-tip {{ position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%) scale(.92);
+        white-space: nowrap; padding: 8px 11px; border-radius: 8px; background: {PANEL_RAISED};
+        border: 1px solid {BORDER}; font-size: 10.5px; opacity: 0; pointer-events: none; text-align: left;
+        transition: opacity .18s ease, transform .18s ease; z-index: 10; }}
+    .planet:hover .planet-tip {{ opacity: 1; transform: translateX(-50%) scale(1) translateY(-4px); }}
+    .planet-tip-name {{ font-family: 'IBM Plex Mono', monospace; font-weight: 600; color: {INK}; }}
+    .planet-tip-sub {{ color: {MUTED}; margin: 2px 0; }}
+    .planet-tip-return {{ font-family: 'IBM Plex Mono', monospace; }}
+    .planet-tip-return.gain {{ color: {BULL}; }} .planet-tip-return.loss {{ color: {BEAR}; }}
+    </style>
+    """)
+
+
+def fund_cluster_html(items: list[dict]) -> str:
+    """
+    Renders mutual fund holdings as a star cluster: each fund is one star,
+    sized by portfolio weight and positioned in a loose group with other
+    funds of the same asset class. `items` is a list of dicts with keys
+    `label`, `category` (one of CATEGORY_COLORS), and `weight_pct` (0-100).
+
+    A precise legend/table sits beside or below this everywhere it's used -
+    the cluster is for pattern-spotting at a glance, never the only place
+    the exact weight is written down.
+    """
+    if not items:
+        return _flatten_html(f"""
+        <div class="sky-card"><div class="sky-empty">Add a fund to see your allocation
+        as a sky map.</div></div>
+        <style>.sky-card {{ background: {NAVY}; border: 1px solid {BORDER}; border-radius: 16px; padding: 22px 24px; }}
+        .sky-empty {{ font-size: 0.85rem; color: {MUTED}; }}</style>
+        """)
+
+    # Fixed anchor points (as % of the field) per category, so a category's
+    # cluster always forms in the same corner regardless of which funds
+    # populate it.
+    anchors = {
+        "Equity": (26, 30), "Debt": (72, 68), "Hybrid": (50, 46),
+        "Index/ETF": (78, 24), "Other": (22, 74),
+    }
+    max_weight = max((it["weight_pct"] for it in items), default=1.0) or 1.0
+    by_category: dict[str, list[dict]] = {}
+    for item in items:
+        by_category.setdefault(item["category"], []).append(item)
+
+    star_html = []
+    for category, group in by_category.items():
+        ax, ay = anchors.get(category, anchors["Other"])
+        color = CATEGORY_COLORS.get(category, MUTED)
+        for i, item in enumerate(group):
+            jitter_x = (_stable_unit("cx", item["label"]) - 0.5) * 22
+            jitter_y = (_stable_unit("cy", item["label"]) - 0.5) * 22
+            spiral = i * 7
+            px = min(max(ax + jitter_x + spiral * 0.4, 6), 94)
+            py = min(max(ay + jitter_y - spiral * 0.3, 8), 90)
+            size = 8 + round((item["weight_pct"] / max_weight) * 20)
+            glow = round(size * 0.7)
+            star_html.append(_flatten_html(f"""
+            <div class="star" style="top:{py:.1f}%;left:{px:.1f}%;width:{size}px;height:{size}px;
+                background:radial-gradient(circle at 35% 30%, #fff, {color} 70%);
+                box-shadow:0 0 {glow}px {color}99;">
+                <div class="star-tip">
+                    <span class="star-tip-name">{item['label']}</span> - {category} -
+                    <span class="star-tip-pct">{item['weight_pct']:.1f}%</span>
+                </div>
+            </div>
+            """))
+
+    label_html = []
+    for category in by_category:
+        color = CATEGORY_COLORS.get(category, MUTED)
+        pos = anchors.get(category, anchors["Other"])
+        corner_top = "top:8px;" if pos[1] < 50 else "bottom:8px;"
+        corner_side = "left:14px;" if pos[0] < 50 else "right:14px;"
+        label_html.append(f'<div class="sky-label" style="{corner_top}{corner_side}">{category}</div>')
+
+    return _flatten_html(f"""
+    <div class="sky-card">
+        <div class="sky-field">
+            {"".join(label_html)}
+            {"".join(star_html)}
+        </div>
+    </div>
+    <style>
+    .sky-card {{ background: {NAVY}; border: 1px solid {BORDER}; border-radius: 16px; padding: 18px; }}
+    .sky-field {{ position: relative; width: 100%; height: 280px; border-radius: 10px; overflow: hidden;
+        background: radial-gradient(220px 160px at 22% 30%, rgba(255,255,255,.04), transparent 70%),
+                    radial-gradient(200px 150px at 78% 74%, {CYAN}0D, transparent 70%); }}
+    .sky-label {{ position: absolute; font-family: 'IBM Plex Mono', monospace; font-size: 9px;
+        letter-spacing: 0.05em; text-transform: uppercase; color: {MUTED_2}; }}
+    .star {{ position: absolute; border-radius: 50%; transform: translate(-50%, -50%); cursor: default;
+        transition: filter .15s ease; }}
+    .star:hover {{ filter: brightness(1.35); }}
+    .star-tip {{ position: absolute; bottom: 130%; left: 50%; transform: translateX(-50%) scale(.92);
+        white-space: nowrap; padding: 7px 10px; border-radius: 8px; background: {PANEL_RAISED};
+        border: 1px solid {BORDER}; font-size: 10.5px; color: {MUTED}; opacity: 0; pointer-events: none;
+        transition: opacity .18s ease, transform .18s ease; z-index: 5; }}
+    .star:hover .star-tip {{ opacity: 1; transform: translateX(-50%) scale(1) translateY(-4px); }}
+    .star-tip-name {{ font-weight: 600; color: {INK}; }}
+    .star-tip-pct {{ font-family: 'IBM Plex Mono', monospace; color: {CYAN}; }}
     </style>
     """)
 
@@ -492,7 +775,7 @@ def base_layout(fig, height: int = 340, **kwargs) -> None:
         margin=dict(t=28, b=10, l=10, r=10),
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0)",
-        font=dict(family="-apple-system, Segoe UI, Roboto, sans-serif", color=INK, size=13),
+        font=dict(family="IBM Plex Mono, -apple-system, Segoe UI, Roboto, sans-serif", color=INK, size=13),
         legend=dict(orientation="h", yanchor="bottom", y=1.01, xanchor="left", x=0, bgcolor="rgba(0,0,0,0)", font=dict(color=INK)),
         hoverlabel=dict(bgcolor=NAVY, bordercolor=BORDER, font_color=INK),
         **kwargs,
