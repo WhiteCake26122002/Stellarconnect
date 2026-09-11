@@ -413,27 +413,32 @@ def _order_panel(user_key: str, cash: float) -> None:
             st.error(str(e))
 
 
-def _holdings_watchlist(user_key: str) -> None:
-    """A dense, sparkline-per-row summary of today's move on each holding - the same shape a
-    watchlist on any market-data site uses. `_holdings_table` below has the exact figures."""
+def _holdings_orbit(user_key: str, cash: float) -> None:
+    """A faster, secondary read of the same holdings `_holdings_table` lists in full below -
+    each planet is one position, sized by weight and colored by its own return; hovering one
+    also shows today's real intraday sparkline for terminal-level density."""
     holdings = store.get_holdings(user_key)
     if not holdings:
-        st.caption("No positions yet. Place your first order from the Home tab.")
+        st.markdown(ui_theme.orbit_holdings_html([], "Cash", f"Rs. {cash:,.0f}"), unsafe_allow_html=True)
         return
 
     quotes = get_live_quotes(tuple(h.ticker for h in holdings))
-    rows_html = []
+    items = []
     for h in holdings:
         q = quotes.get(h.ticker)
         px = q["price"] if q else h.avg_cost
-        return_pct = (px / h.avg_cost - 1) * 100 if h.avg_cost else None
+        value = h.quantity * px
+        return_pct = (px / h.avg_cost - 1) * 100 if h.avg_cost else 0.0
         spark = get_intraday_history(h.ticker)
-        spark_values = spark["Close"].tolist() if not spark.empty else None
-        rows_html.append(ui_theme.watchlist_row_html(
-            h.ticker, f"Qty {h.quantity:g} - avg Rs. {h.avg_cost:,.2f}",
-            f"Rs. {px:,.2f}", return_pct, spark_values,
-        ))
-    st.markdown(f'<div class="wl-list">{"".join(rows_html)}</div>', unsafe_allow_html=True)
+        items.append({
+            "label": h.ticker, "sublabel": f"Qty {h.quantity:g} - avg Rs. {h.avg_cost:,.2f}",
+            "weight_pct": value, "return_pct": return_pct,
+            "spark_values": spark["Close"].tolist() if not spark.empty else None,
+        })
+    total = sum(it["weight_pct"] for it in items) or 1.0
+    for it in items:
+        it["weight_pct"] = it["weight_pct"] / total * 100
+    st.markdown(ui_theme.orbit_holdings_html(items, "Cash", f"Rs. {cash:,.0f}"), unsafe_allow_html=True)
 
 
 def _holdings_table(user_key: str) -> float:
@@ -672,7 +677,8 @@ def _dashboard() -> None:
         c1.markdown(ui_theme.kpi_card("Cash", f"Rs. {user.cash:,.2f}", icon="wallet"), unsafe_allow_html=True)
         c2.markdown(ui_theme.kpi_card("Holdings Value", f"Rs. {holdings_value:,.2f}", icon="layers"), unsafe_allow_html=True)
         st.write("")
-        _holdings_watchlist(user_key)
+        _holdings_orbit(user_key, user.cash)
+        st.caption("Each planet is a position - size is its weight in the book, color is its own return. Hover for the numbers and today's move; the table below has the rest.")
         st.write("")
         _holdings_table(user_key)
 
