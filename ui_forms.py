@@ -23,6 +23,7 @@ from backend.engine.wacc import WaccInputs, make_wacc_inputs
 from backend.engine.models import AssumptionSource
 from backend.engine.cost_of_debt import CostOfDebtEstimate
 from backend.data.damodaran_reference import SectorBetaMatch, CountryRiskData, get_country_risk, match_india_sector_beta
+from backend.common.company_search import search_companies
 from backend.ingestion.yfinance_ingestion import fetch_company
 
 IS_ROWS = ["Revenue", "COGS", "R&D", "S&M", "G&A", "D&A", "Interest Expense", "Taxes", "Other Below EBIT"]
@@ -219,17 +220,29 @@ def render_live_company_form() -> tuple[Company | None, HistoricalFinancials | N
     """
     st.header("Search Live Company Data")
     st.caption(
-        "Type a ticker with its Yahoo Finance exchange suffix, e.g. TCS.NS, RELIANCE.NS, INFY.NS (NSE), "
-        "or AAPL (US, no suffix). Financials are fetched automatically; sector beta / country equity risk "
-        "premium / tax rate are then auto-matched against the bundled Damodaran (NYU Stern) reference data."
+        "Search by company name or ticker, e.g. \"TCS\", \"Reliance\", or \"AAPL\". Financials are fetched "
+        "automatically once you pick a match; sector beta / country equity risk premium / tax rate are then "
+        "auto-matched against the bundled Damodaran (NYU Stern) reference data."
     )
-    ticker = st.text_input("Ticker", placeholder="e.g. TCS.NS")
-    fetch_clicked = st.button("Fetch Company Data")
+    query = st.text_input("Search company", placeholder="e.g. TCS, Reliance Industries, AAPL", key="dcf_company_query")
 
-    if fetch_clicked and ticker.strip():
-        with st.spinner(f"Fetching {ticker.strip()} from Yahoo Finance..."):
+    ticker = ""
+    if query.strip():
+        matches = search_companies(query.strip())
+        if matches:
+            options = {f"{m['name']} ({m['symbol']}) - {m['exchange']}": m["symbol"] for m in matches}
+            choice = st.selectbox("Matching companies", list(options.keys()), key="dcf_company_choice")
+            ticker = options[choice]
+        else:
+            st.caption("No matches yet - keep typing, or enter the exact ticker (e.g. TCS.NS) directly.")
+            ticker = query.strip()
+
+    fetch_clicked = st.button("Fetch Company Data", disabled=not ticker, type="primary")
+
+    if fetch_clicked and ticker:
+        with st.spinner(f"Fetching {ticker} from Yahoo Finance..."):
             try:
-                st.session_state["live_result"] = fetch_company(ticker.strip())
+                st.session_state["live_result"] = fetch_company(ticker)
             except ValueError as e:
                 st.session_state.pop("live_result", None)
                 st.error(str(e))

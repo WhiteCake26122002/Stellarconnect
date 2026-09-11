@@ -125,16 +125,21 @@ st.sidebar.caption(f"{company.name} ({company.ticker or 'n/a'}): {company.compan
 _widget_scope = f"{data_source}:{company.ticker or company.name}"  # widgets reset to fresh defaults when the company changes
 
 st.sidebar.subheader("Forecast Horizon")
-forecast_years = st.sidebar.selectbox("Explicit forecast period", [3, 5, 7, 10], index=1, key=f"fy_{_widget_scope}")
+forecast_years = st.sidebar.selectbox(
+    "Explicit forecast period", [3, 5, 7, 10], index=1, key=f"fy_{_widget_scope}",
+    help="How many years get a full year-by-year forecast before the terminal value takes over. Longer horizons lean less on the terminal-value assumptions.",
+)
 
 st.sidebar.subheader("Revenue & Margin")
 long_term_growth = st.sidebar.slider(
-    "Long-term revenue growth (terminal glide target)", 0.0, 15.0, 4.0, 0.5, format="%.1f%%", key=f"ltg_{_widget_scope}"
+    "Long-term revenue growth (terminal glide target)", 0.0, 15.0, 4.0, 0.5, format="%.1f%%", key=f"ltg_{_widget_scope}",
+    help="The growth rate revenue glides toward by the final forecast year, decelerating smoothly from the current run-rate.",
 ) / 100
 default_margin_pct = min(60.0, max(5.0, float(max(y.ebitda_margin for y in summary.years)) * 100))
 target_ebitda_margin = st.sidebar.slider(
     "Target EBITDA margin (by final forecast year)", 5.0, 60.0, default_margin_pct, 0.5, format="%.1f%%",
     key=f"margin_{_widget_scope}",
+    help="The EBITDA margin assumed by the final forecast year. Historical margins are on the Historical Analysis tab for reference.",
 ) / 100
 
 st.sidebar.subheader("WACC Inputs")
@@ -145,9 +150,18 @@ if sector_match:
 if country_risk:
     st.sidebar.caption(f"ERP default sourced from Damodaran country risk data ({country_risk.country}).")
 
-risk_free_rate = st.sidebar.slider("Risk-free rate", 0.0, 15.0, 4.2, 0.1, format="%.1f%%", key=f"rf_{_widget_scope}") / 100
-beta = st.sidebar.number_input("Beta", 0.3, 3.0, _beta_default, 0.01, key=f"beta_{_widget_scope}")
-equity_risk_premium = st.sidebar.slider("Equity risk premium", 0.0, 15.0, _erp_default, 0.1, format="%.1f%%", key=f"erp_{_widget_scope}") / 100
+risk_free_rate = st.sidebar.slider(
+    "Risk-free rate", 0.0, 15.0, 4.2, 0.1, format="%.1f%%", key=f"rf_{_widget_scope}",
+    help="The base rate in CAPM, typically a long-term government bond yield in the company's home currency.",
+) / 100
+beta = st.sidebar.number_input(
+    "Beta", 0.3, 3.0, _beta_default, 0.01, key=f"beta_{_widget_scope}",
+    help="Levered beta, the stock's sensitivity to the overall market. Auto-matched from Damodaran sector data when available.",
+)
+equity_risk_premium = st.sidebar.slider(
+    "Equity risk premium", 0.0, 15.0, _erp_default, 0.1, format="%.1f%%", key=f"erp_{_widget_scope}",
+    help="The extra return investors demand for holding equities over a risk-free asset, used alongside beta in CAPM.",
+) / 100
 
 _kd_estimate = estimate_pretax_cost_of_debt(
     risk_free_rate, hist.income_statements[-1].ebit, hist.income_statements[-1].interest_expense,
@@ -162,16 +176,21 @@ if _kd_estimate.interest_coverage_ratio is not None:
     )
 else:
     st.sidebar.caption("Cost of debt default: negligible interest expense reported, defaulted to the safest spread tier.")
-pretax_cost_of_debt = st.sidebar.slider("Pre-tax cost of debt", 0.0, 20.0, _kd_default, 0.1, format="%.1f%%", key=f"kd_{_widget_scope}") / 100
+pretax_cost_of_debt = st.sidebar.slider(
+    "Pre-tax cost of debt", 0.0, 20.0, _kd_default, 0.1, format="%.1f%%", key=f"kd_{_widget_scope}",
+    help="The company's borrowing rate before the tax shield, used to compute the after-tax cost of debt in WACC.",
+) / 100
 if company.company_type == CompanyType.PRIVATE and "custom_target_equity_weight" not in st.session_state:
     st.session_state["custom_target_equity_weight"] = 0.70
 
 st.sidebar.subheader("Terminal Value")
 terminal_growth = st.sidebar.slider(
-    "Terminal growth rate (g)", 0.0, 6.0, 3.0, 0.1, format="%.1f%%", key=f"tg_{_widget_scope}"
+    "Terminal growth rate (g)", 0.0, 6.0, 3.0, 0.1, format="%.1f%%", key=f"tg_{_widget_scope}",
+    help="The perpetual growth rate applied after the explicit forecast, in the Gordon Growth terminal value. Must stay below WACC.",
 ) / 100
 exit_multiple = st.sidebar.number_input(
-    "Exit multiple (x EBITDA, cross-check)", 1.0, 40.0, 14.0, 0.5, key=f"exit_mult_{_widget_scope}"
+    "Exit multiple (x EBITDA, cross-check)", 1.0, 40.0, 14.0, 0.5, key=f"exit_mult_{_widget_scope}",
+    help="An EBITDA exit multiple shown as a cross-check against the Gordon Growth terminal value; not used in the primary Enterprise Value.",
 )
 
 st.sidebar.caption("Any change above triggers a full model recalculation. Nothing is cached across assumptions.")
@@ -255,24 +274,25 @@ with tabs[0]:
 
         upside = valuation.equity_bridge.upside_downside
         c1, c2, c3, c4, c5 = st.columns(5)
-        c1.markdown(ui_theme.kpi_card("Enterprise Value", money(valuation.enterprise_value), icon="layers"), unsafe_allow_html=True)
-        c2.markdown(ui_theme.kpi_card("Equity Value", money(valuation.equity_bridge.equity_value), icon="wallet"), unsafe_allow_html=True)
-        c3.markdown(ui_theme.kpi_card("Implied Share Price", per_share_fmt(valuation.equity_bridge.equity_value_per_share), icon="target"), unsafe_allow_html=True)
-        c4.markdown(ui_theme.kpi_card("Current Share Price", per_share_fmt(valuation.equity_bridge.current_share_price), icon="bar-chart"), unsafe_allow_html=True)
+        c1.markdown(ui_theme.kpi_card("Enterprise Value", money(valuation.enterprise_value), icon="layers", tooltip="The value of the whole business: operations only, before splitting it between lenders and shareholders."), unsafe_allow_html=True)
+        c2.markdown(ui_theme.kpi_card("Equity Value", money(valuation.equity_bridge.equity_value), icon="wallet", tooltip="Enterprise Value plus cash, minus debt and other non-equity claims: what's left for shareholders."), unsafe_allow_html=True)
+        c3.markdown(ui_theme.kpi_card("Implied Share Price", per_share_fmt(valuation.equity_bridge.equity_value_per_share), icon="target", tooltip="Equity Value divided by diluted shares outstanding: what this model says a share is worth."), unsafe_allow_html=True)
+        c4.markdown(ui_theme.kpi_card("Current Share Price", per_share_fmt(valuation.equity_bridge.current_share_price), icon="bar-chart", tooltip="The live market price, for comparison against the model's implied price."), unsafe_allow_html=True)
         c5.markdown(
             ui_theme.kpi_card(
                 "Upside / (Downside)", pct(upside),
                 icon="trending-up" if upside >= 0 else "trending-down", change_pct=upside * 100,
+                tooltip="How far the implied price sits above or below the current price: the gravity well's marker, as a single number.",
             ),
             unsafe_allow_html=True,
         )
 
         st.write("")
         c6, c7, c8, c9 = st.columns(4)
-        c6.markdown(ui_theme.kpi_card("WACC", pct(wacc_result.wacc), icon="percent"), unsafe_allow_html=True)
-        c7.markdown(ui_theme.kpi_card("Terminal Growth", pct(terminal_growth), icon="percent"), unsafe_allow_html=True)
-        c8.markdown(ui_theme.kpi_card("Terminal EBITDA Margin", pct(forecast.years[-1].ebitda_margin), icon="percent"), unsafe_allow_html=True)
-        c9.markdown(ui_theme.kpi_card("Terminal Value % of EV", pct(valuation.terminal_value_pct_of_ev), icon="percent"), unsafe_allow_html=True)
+        c6.markdown(ui_theme.kpi_card("WACC", pct(wacc_result.wacc), icon="percent", tooltip="Weighted Average Cost of Capital: the discount rate, blending the cost of equity (CAPM) and after-tax cost of debt by their market weights."), unsafe_allow_html=True)
+        c7.markdown(ui_theme.kpi_card("Terminal Growth", pct(terminal_growth), icon="percent", tooltip="The perpetual growth rate assumed after the explicit forecast ends, feeding the Gordon Growth terminal value."), unsafe_allow_html=True)
+        c8.markdown(ui_theme.kpi_card("Terminal EBITDA Margin", pct(forecast.years[-1].ebitda_margin), icon="percent", tooltip="The EBITDA margin in the final explicit forecast year, the level the terminal value assumes holds steady."), unsafe_allow_html=True)
+        c9.markdown(ui_theme.kpi_card("Terminal Value % of EV", pct(valuation.terminal_value_pct_of_ev), icon="percent", tooltip="How much of Enterprise Value comes from cash flows after the explicit forecast. Above ~90% means two assumptions (WACC, terminal growth) are doing most of the work."), unsafe_allow_html=True)
         if valuation.terminal_value_pct_of_ev > 0.90:
             st.warning(f"Terminal value represents {pct(valuation.terminal_value_pct_of_ev)} of Enterprise Value, which is unusually high; the explicit forecast is contributing almost nothing to the valuation. Consider a longer forecast horizon or double-checking WACC and terminal growth.")
 

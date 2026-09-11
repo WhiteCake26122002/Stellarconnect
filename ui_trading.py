@@ -26,6 +26,7 @@ from streamlit_autorefresh import st_autorefresh
 
 import ui_common
 import ui_theme
+from backend.common.company_search import search_companies
 from backend.common.finance import jensens_alpha
 from backend.trading import analysis, store
 from backend.trading.models import STARTING_CASH
@@ -369,7 +370,7 @@ def _popular_stocks_row() -> None:
 def _order_panel(user_key: str, cash: float) -> None:
     st.markdown('<div class="pt-section-label">Place an Order</div>', unsafe_allow_html=True)
     c1, c2, c3 = st.columns([2, 1, 1])
-    ticker = c1.text_input("Ticker", key="pt_ticker_input", placeholder="e.g. RELIANCE.NS, AAPL")
+    ticker = c1.text_input("Ticker", key="pt_ticker_input", placeholder="e.g. RELIANCE.NS, AAPL, or search \"Reliance\"")
     qty = c2.number_input("Quantity", min_value=0.0, value=0.0, step=1.0, key="pt_qty_input")
 
     live_price = None
@@ -385,7 +386,15 @@ def _order_panel(user_key: str, cash: float) -> None:
                 st.caption(f"Order value: {qty * live_price:,.2f} (cash available: {cash:,.2f})")
         else:
             c3.metric("Live Price", "n/a")
-            st.warning(f"Could not fetch a live price for '{ticker}'. Check the ticker/exchange suffix (e.g. RELIANCE.NS, AAPL).")
+            matches = search_companies(ticker.strip())
+            if matches:
+                st.caption("Not a live ticker as typed. Did you mean:")
+                sugg_cols = st.columns(len(matches))
+                for col, m in zip(sugg_cols, matches):
+                    if col.button(m["symbol"], key=f"pt_sugg_{m['symbol']}", help=f"{m['name']} - {m['exchange']}", use_container_width=True):
+                        st.session_state["pt_ticker_input"] = m["symbol"]
+            else:
+                st.warning(f"Could not fetch a live price for '{ticker}'. Check the ticker/exchange suffix (e.g. RELIANCE.NS, AAPL).")
 
     bcol, scol = st.columns(2)
     if bcol.button("Buy", use_container_width=True, type="primary", disabled=not (ticker.strip() and qty > 0 and live_price)):
@@ -404,29 +413,27 @@ def _order_panel(user_key: str, cash: float) -> None:
             st.error(str(e))
 
 
-def _holdings_orbit(user_key: str, cash: float) -> None:
-    """A faster, secondary read of the same holdings `_holdings_table` lists in full below -
-    each planet is one position, sized by weight and colored by its own return."""
+def _holdings_watchlist(user_key: str) -> None:
+    """A dense, sparkline-per-row summary of today's move on each holding - the same shape a
+    watchlist on any market-data site uses. `_holdings_table` below has the exact figures."""
     holdings = store.get_holdings(user_key)
     if not holdings:
-        st.markdown(ui_theme.orbit_holdings_html([], "Cash", f"Rs. {cash:,.0f}"), unsafe_allow_html=True)
+        st.caption("No positions yet. Place your first order from the Home tab.")
         return
 
     quotes = get_live_quotes(tuple(h.ticker for h in holdings))
-    items = []
+    rows_html = []
     for h in holdings:
         q = quotes.get(h.ticker)
         px = q["price"] if q else h.avg_cost
-        value = h.quantity * px
-        return_pct = (px / h.avg_cost - 1) * 100 if h.avg_cost else 0.0
-        items.append({
-            "label": h.ticker, "sublabel": f"Qty {h.quantity:g} - avg Rs. {h.avg_cost:,.2f}",
-            "weight_pct": value, "return_pct": return_pct,
-        })
-    total = sum(it["weight_pct"] for it in items) or 1.0
-    for it in items:
-        it["weight_pct"] = it["weight_pct"] / total * 100
-    st.markdown(ui_theme.orbit_holdings_html(items, "Cash", f"Rs. {cash:,.0f}"), unsafe_allow_html=True)
+        return_pct = (px / h.avg_cost - 1) * 100 if h.avg_cost else None
+        spark = get_intraday_history(h.ticker)
+        spark_values = spark["Close"].tolist() if not spark.empty else None
+        rows_html.append(ui_theme.watchlist_row_html(
+            h.ticker, f"Qty {h.quantity:g} - avg Rs. {h.avg_cost:,.2f}",
+            f"Rs. {px:,.2f}", return_pct, spark_values,
+        ))
+    st.markdown(f'<div class="wl-list">{"".join(rows_html)}</div>', unsafe_allow_html=True)
 
 
 def _holdings_table(user_key: str) -> float:
@@ -586,13 +593,13 @@ def _benchmarks_tab(created_at: dt.date, cash: float, holdings: list, live_price
     bc1, bc2, bc3 = st.columns(3)
     with bc1:
         with st.container(border=True):
-            st.metric("Portfolio Beta", f"{portfolio_beta:.2f}")
+            st.metric("Portfolio Beta", f"{portfolio_beta:.2f}", help="How sensitive your portfolio is to the benchmark's moves. 1.0 tracks it exactly; above 1.0 amplifies it, below 1.0 dampens it.")
     with bc2:
         with st.container(border=True):
-            st.metric(f"{benchmark_label} Return", f"{benchmark_return:+.2f}%")
+            st.metric(f"{benchmark_label} Return", f"{benchmark_return:+.2f}%", help="The benchmark's own return over the same period, for comparison against your portfolio's return.")
     with bc3:
         with st.container(border=True):
-            st.metric("Alpha (α)", f"{alpha:+.2f}%")
+            st.metric("Alpha (α)", f"{alpha:+.2f}%", help="The return your portfolio earned above (or below) what its beta alone would predict against this benchmark, at the given risk-free rate.")
 
     if alpha > 0:
         st.success(f"Positive alpha: your portfolio beat what its risk level (beta {portfolio_beta:.2f}) would predict against {benchmark_label}.")
@@ -665,8 +672,7 @@ def _dashboard() -> None:
         c1.markdown(ui_theme.kpi_card("Cash", f"Rs. {user.cash:,.2f}", icon="wallet"), unsafe_allow_html=True)
         c2.markdown(ui_theme.kpi_card("Holdings Value", f"Rs. {holdings_value:,.2f}", icon="layers"), unsafe_allow_html=True)
         st.write("")
-        _holdings_orbit(user_key, user.cash)
-        st.caption("Each planet is a position - size is its weight in the book, color is its own return. Hover for the numbers; the table below has the rest.")
+        _holdings_watchlist(user_key)
         st.write("")
         _holdings_table(user_key)
 

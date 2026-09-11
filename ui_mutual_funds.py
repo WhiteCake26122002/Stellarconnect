@@ -135,12 +135,16 @@ def _portfolio_tab(user_key: str, enriched: list[dict]) -> None:
     )
 
     st.write("")
-    cluster_items = [{
-        "label": h["scheme_name"], "category": analysis.classify_asset_class(h["scheme_category"]),
-        "weight_pct": (h["value"] / total_value * 100) if total_value else 0.0,
-    } for h in enriched if h["value"]]
-    st.markdown(ui_theme.fund_cluster_html(cluster_items), unsafe_allow_html=True)
-    st.caption("Each star is one scheme, sized by weight and grouped with others of the same asset class. Hover for the exact number - the table below has the rest.")
+    rows_html = "".join(
+        ui_theme.watchlist_row_html(
+            h["scheme_name"][:38] + ("..." if len(h["scheme_name"]) > 38 else ""),
+            f"{h['scheme_category']} - {(h['value'] / total_value * 100) if total_value else 0:.1f}% of book",
+            f"Rs. {h['current_nav']:,.2f}" if h["current_nav"] is not None else "n/a",
+            h["gain_pct"],
+        )
+        for h in enriched
+    )
+    st.markdown(f'<div class="wl-list">{rows_html}</div>', unsafe_allow_html=True)
 
     st.write("")
     df = pd.DataFrame([{
