@@ -103,7 +103,7 @@ def _add_fund_section(user_key: str) -> None:
         purchase_nav = latest_price if nav_mode == "Use latest NAV" else manual_nav
         try:
             store.add_holding(user_key, selected["code"], selected["name"], units, purchase_nav, purchase_date.isoformat())
-            st.success(f"Added {units:g} units of {selected['name']} at Rs. {purchase_nav:,.4f}.")
+            st.toast(f"Added {units:g} units of {selected['name']}", icon="✅")
             st.rerun()
         except store.MFError as e:
             st.error(str(e))
@@ -163,6 +163,7 @@ def _portfolio_tab(user_key: str, enriched: list[dict]) -> None:
     )
     if rc2.button("Remove", use_container_width=True):
         store.remove_holding(user_key, options[choice])
+        st.toast(f"Removed {choice}", icon="🗑️")
         st.rerun()
 
 

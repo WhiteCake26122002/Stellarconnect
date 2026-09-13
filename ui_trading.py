@@ -174,7 +174,7 @@ def _live_ticker_strip() -> None:
                         ui_theme._flatten_html(f"""
                         <div style="text-align:center;">
                             <div class="pt-ticker-sym">{t}</div>
-                            <div class="pt-ticker-px">{q['price']:,.2f}</div>
+                            <div class="pt-ticker-px" data-countup="{q['price']:,.2f}" data-countup-key="px:{t}">{q['price']:,.2f}</div>
                             <div class="pt-ticker-chg {cls}">{_fmt_change(q['change'], q['change_pct'])}</div>
                         </div>
                         """),
@@ -257,7 +257,7 @@ def _top_navbar(display_name: str) -> None:
         cls = "up" if q["change"] >= 0 else "down"
         return (
             f'<div class="pt-index"><span class="pt-index-label">{label}</span>'
-            f'<span class="pt-index-val">{q["price"]:,.2f}</span>'
+            f'<span class="pt-index-val" data-countup="{q["price"]:,.2f}" data-countup-key="idx:{label}">{q["price"]:,.2f}</span>'
             f'<span class="pt-index-chg {cls}">{_fmt_change(q["change"], q["change_pct"])}</span></div>'
         )
 
@@ -294,6 +294,7 @@ def _watchlist_sidebar() -> None:
         t = new_ticker.strip().upper()
         if t not in watchlist:
             watchlist.append(t)
+            st.toast(f"Added {t} to watchlist", icon="⭐")
 
     quotes = get_live_quotes(tuple(watchlist)) if watchlist else {}
     for t in watchlist:
@@ -308,7 +309,7 @@ def _watchlist_sidebar() -> None:
             if q:
                 cls = "up" if q["change"] >= 0 else "down"
                 rc2.markdown(
-                    f'<div class="pt-watch-px">{q["price"]:,.2f}</div>'
+                    f'<div class="pt-watch-px" data-countup="{q["price"]:,.2f}" data-countup-key="wl:{t}">{q["price"]:,.2f}</div>'
                     f'<div class="pt-watch-chg {cls}">{_fmt_change(q["change"], q["change_pct"])}</div>',
                     unsafe_allow_html=True,
                 )
@@ -319,6 +320,7 @@ def _watchlist_sidebar() -> None:
                 st.session_state["pt_ticker_input"] = t
             if wcol2.button("Remove", key=f"watch_remove_{t}", use_container_width=True):
                 watchlist.remove(t)
+                st.toast(f"Removed {t} from watchlist", icon="🗑️")
                 st.rerun()
 
 
@@ -400,14 +402,14 @@ def _order_panel(user_key: str, cash: float) -> None:
     if bcol.button("Buy", use_container_width=True, type="primary", disabled=not (ticker.strip() and qty > 0 and live_price)):
         try:
             store.execute_buy(user_key, ticker.strip().upper(), qty, live_price)
-            st.success(f"Bought {qty:g} {ticker.strip().upper()} at {live_price:,.2f}")
+            st.toast(f"Bought {qty:g} {ticker.strip().upper()} at {live_price:,.2f}", icon="✅")
             st.rerun()
         except store.TradeError as e:
             st.error(str(e))
     if scol.button("Sell", use_container_width=True, disabled=not (ticker.strip() and qty > 0 and live_price)):
         try:
             store.execute_sell(user_key, ticker.strip().upper(), qty, live_price)
-            st.success(f"Sold {qty:g} {ticker.strip().upper()} at {live_price:,.2f}")
+            st.toast(f"Sold {qty:g} {ticker.strip().upper()} at {live_price:,.2f}", icon="✅")
             st.rerun()
         except store.TradeError as e:
             st.error(str(e))

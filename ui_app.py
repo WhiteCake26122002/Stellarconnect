@@ -37,6 +37,7 @@ from ui_forms import build_wacc_inputs_for_company, render_custom_company_form, 
 
 st.set_page_config(page_title="DCF Valuation Platform", layout="wide", page_icon="📈")
 ui_theme.inject_css()
+ui_theme.inject_interactions()
 
 st.sidebar.title("Mode")
 app_mode = st.sidebar.radio(
@@ -601,7 +602,8 @@ with tabs[8]:
         st.error(valuation_error)
     else:
         integrity = run_validation(hist, summary, forecast, wacc_result, valuation)
-        st.metric("Model Integrity Score", integrity.summary)
+        st.markdown(ui_theme.integrity_meter_html(integrity.score, integrity.max_score, integrity.band), unsafe_allow_html=True)
+        st.write("")
         for issue in integrity.issues:
             if issue.severity == "error":
                 st.error(issue.message)

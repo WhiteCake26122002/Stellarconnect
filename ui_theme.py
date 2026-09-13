@@ -156,8 +156,32 @@ def kpi_card(
     return _flatten_html(f"""
     <div class="kpi-card">
         <div class="kpi-top">{icon_html}{badge_html}</div>
-        <div class="kpi-value">{value}</div>
+        <div class="kpi-value" data-countup="{value}" data-countup-key="kpi:{label}">{value}</div>
         <div class="{label_cls}"{title_attr}>{label}</div>
+    </div>
+    """)
+
+
+def integrity_meter_html(score: int, max_score: int, band: str) -> str:
+    """
+    An animated fill-meter for the Model Integrity Score (Bloomberg/credit-score-gauge style)
+    instead of a bare number: the bar sweeps in on render and its color tier (bull/warn/bear)
+    doubles as the same verdict `band` already states in words, so the two never disagree.
+    """
+    frac = max(0.0, min(1.0, (score / max_score) if max_score else 0.0))
+    pct_val = frac * 100
+    tier = "good" if pct_val >= 80 else "mid" if pct_val >= 60 else "bad"
+    return _flatten_html(f"""
+    <div class="meter-card">
+        <div class="meter-top">
+            <div class="meter-label">Model Integrity Score</div>
+            <div class="meter-band {tier}">{band}</div>
+        </div>
+        <div class="meter-track"><div class="meter-fill {tier}" style="--fill:{pct_val:.0f}%;width:{pct_val:.0f}%;"></div></div>
+        <div class="meter-score-row">
+            <span class="meter-score" data-countup="{score}" data-countup-key="integrity-score">{score}</span>
+            <span class="meter-max">/ {max_score}</span>
+        </div>
     </div>
     """)
 
@@ -496,15 +520,156 @@ def inject_css() -> None:
             0% {{ transform: translate(-50%, -50%); opacity: 0; }}
             20% {{ opacity: 1; }} 100% {{ transform: translate(calc(-50% + var(--tx)), calc(-50% + var(--ty))); opacity: 0; }}
         }}
+
+        /* ---- Live-data feedback: a number that just changed briefly tints green/red,
+           the way a real trading terminal calls out a tick - see inject_interactions()
+           for the JS that toggles these classes and animates the count-up itself. ---- */
+        @keyframes dcf-flash-up {{ 0% {{ background: {BULL_SOFT}; }} 100% {{ background: transparent; }} }}
+        @keyframes dcf-flash-down {{ 0% {{ background: {BEAR_SOFT}; }} 100% {{ background: transparent; }} }}
+        .dcf-flash-up {{ animation: dcf-flash-up 900ms ease-out; border-radius: 4px; }}
+        .dcf-flash-down {{ animation: dcf-flash-down 900ms ease-out; border-radius: 4px; }}
+
+        /* ---- Model Integrity meter: a sweeping fill-bar instead of a bare number ---- */
+        @keyframes dcf-meter-fill {{ from {{ width: 0%; }} to {{ width: var(--fill); }} }}
+        .meter-card {{ background: {PANEL}; border: 1px solid {BORDER}; border-radius: 12px; padding: 1.1rem 1.3rem; max-width: 420px; }}
+        .meter-top {{ display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }}
+        .meter-label {{ font-size: 0.82rem; color: {MUTED}; font-weight: 600; }}
+        .meter-band {{ font-family: 'IBM Plex Mono', monospace; font-size: 0.7rem; font-weight: 700; padding: 3px 10px; border-radius: 999px; white-space: nowrap; }}
+        .meter-band.good {{ background: {BULL_SOFT}; color: {BULL}; }}
+        .meter-band.mid {{ background: {WARN_SOFT}; color: {WARN}; }}
+        .meter-band.bad {{ background: {BEAR_SOFT}; color: {BEAR}; }}
+        .meter-track {{ height: 10px; border-radius: 999px; background: {NAVY_SOFT}; overflow: hidden; }}
+        .meter-fill {{ height: 100%; border-radius: 999px; animation: dcf-meter-fill 1.1s cubic-bezier(.16,1,.3,1) both; }}
+        .meter-fill.good {{ background: linear-gradient(90deg, {BULL}99, {BULL}); }}
+        .meter-fill.mid {{ background: linear-gradient(90deg, {WARN}99, {WARN}); }}
+        .meter-fill.bad {{ background: linear-gradient(90deg, {BEAR}99, {BEAR}); }}
+        .meter-score-row {{ margin-top: 10px; }}
+        .meter-score {{ font-family: 'IBM Plex Mono', monospace; font-size: 1.7rem; font-weight: 700; color: {INK}; }}
+        .meter-max {{ font-family: 'IBM Plex Mono', monospace; font-size: 0.95rem; color: {MUTED_2}; margin-left: 2px; }}
+
+        /* ---- Secondary buttons get the same hover-lift language as cards/primary buttons ---- */
+        div.stButton > button:hover, div.stDownloadButton > button:hover {{
+            transform: translateY(-1px);
+            box-shadow: 0 6px 16px -4px rgba(0,0,0,0.4);
+        }}
+
+        /* ---- Alerts slide/fade in instead of popping into place ------------------ */
+        @keyframes dcf-alert-in {{ from {{ opacity: 0; transform: translateY(6px); }} to {{ opacity: 1; transform: translateY(0); }} }}
+        [data-testid="stAlertContainer"] {{ animation: dcf-alert-in 0.35s ease-out; }}
+
+        /* ---- Expanders: a hover cue on the collapsed header ----------------------- */
+        [data-testid="stExpander"] summary {{ border-radius: 8px; transition: background-color 0.15s ease; }}
+        [data-testid="stExpander"] summary:hover {{ background: rgba(255,255,255,0.05); }}
+
+        /* ---- Slider thumbs get a brand glow on hover/drag, like a physical dial --- */
+        [data-testid="stSlider"] [role="slider"] {{ transition: box-shadow 0.15s ease, transform 0.1s ease; }}
+        [data-testid="stSlider"] [role="slider"]:hover {{ box-shadow: 0 0 0 8px {NAVY_LIGHT}26; }}
+        [data-testid="stSlider"] [role="slider"]:active {{ box-shadow: 0 0 0 10px {NAVY_LIGHT}3D; transform: scale(1.05); }}
+
         @media (prefers-reduced-motion: reduce) {{
-            .well-ring, .orbit-ring, .osun, .pulse, .node-halo,
+            .well-ring, .orbit-ring, .osun, .pulse, .node-halo, .meter-fill,
+            .dcf-flash-up, .dcf-flash-down, [data-testid="stAlertContainer"],
             [data-testid="stRadioGroup"][aria-label="Choose a tool"] [data-testid="stRadioOption"]::after {{
                 animation: none !important;
             }}
+            div.stButton > button:hover, div.stDownloadButton > button:hover {{ transform: none; }}
         }}
         </style>
         """,
         unsafe_allow_html=True,
+    )
+
+
+def inject_interactions() -> None:
+    """
+    A small, self-contained script that gives every live figure in the app two things a static
+    number can't: it counts up from zero when it first appears (or changes), and it flashes
+    green/up or red/down for an instant when a value ticks - the same feedback loop a real
+    trading terminal gives on every price update, applied here to KPI cards, the integrity
+    meter, and every live price in Paper Trading.
+
+    Implementation note: Streamlit's own script re-runs on every interaction re-render the
+    HTML these values live in from scratch, so there's no single persistent DOM node to attach
+    a "did this change" listener to. Instead this installs ONE MutationObserver (guarded so a
+    rerun never installs a second one) on the parent document that watches for any element
+    carrying a `data-countup` attribute, wherever and whenever it appears - which is exactly
+    what a component.html iframe can do (it shares the same top-level `window.parent.document`
+    Streamlit itself renders into), so this behaves identically no matter which mode
+    (DCF/Paper Trading/Mutual Funds) is currently rendering.
+    """
+    from streamlit.components.v1 import html as _components_html
+
+    _components_html(
+        """
+        <script>
+        (function () {
+            var doc = window.parent.document;
+            if (doc.__dcfCountupInstalled) { return; }
+            doc.__dcfCountupInstalled = true;
+
+            var mem = window.parent.__dcfCountupMem || (window.parent.__dcfCountupMem = {});
+
+            function animate(el) {
+                var raw = el.getAttribute('data-countup');
+                if (raw === null) { return; }
+                var match = raw.match(/^([^\\d\\-]*)(-?[\\d,]+(?:\\.\\d+)?)(.*)$/);
+                if (!match) { return; }
+                var prefix = match[1], numStr = match[2].replace(/,/g, ''), suffix = match[3];
+                var end = parseFloat(numStr);
+                if (isNaN(end)) { return; }
+                var decimals = (numStr.split('.')[1] || '').length;
+
+                var key = el.getAttribute('data-countup-key');
+                if (key) {
+                    var prev = mem[key];
+                    if (prev !== undefined && prev !== end) {
+                        el.classList.remove('dcf-flash-up', 'dcf-flash-down');
+                        void el.offsetWidth;
+                        el.classList.add(end > prev ? 'dcf-flash-up' : 'dcf-flash-down');
+                    }
+                    mem[key] = end;
+                }
+
+                var duration = 650;
+                var t0 = performance.now();
+                function step(now) {
+                    var t = Math.min((now - t0) / duration, 1);
+                    var eased = 1 - Math.pow(1 - t, 3);
+                    var val = end * eased;
+                    el.textContent = prefix + val.toLocaleString('en-IN', {
+                        minimumFractionDigits: decimals, maximumFractionDigits: decimals,
+                    }) + suffix;
+                    if (t < 1) { requestAnimationFrame(step); } else { el.textContent = raw; }
+                }
+                requestAnimationFrame(step);
+            }
+
+            function scan(node) {
+                if (node.nodeType !== 1) { return; }
+                if (node.matches && node.matches('[data-countup]')) { animate(node); }
+                if (node.querySelectorAll) {
+                    node.querySelectorAll('[data-countup]').forEach(animate);
+                }
+            }
+
+            scan(doc.body);
+            var observer = new MutationObserver(function (mutations) {
+                mutations.forEach(function (m) {
+                    if (m.type === 'childList') {
+                        m.addedNodes.forEach(scan);
+                    } else if (m.type === 'attributes') {
+                        animate(m.target);
+                    }
+                });
+            });
+            observer.observe(doc.body, {
+                childList: true, subtree: true, attributes: true, attributeFilter: ['data-countup'],
+            });
+        })();
+        </script>
+        """,
+        height=0,
+        width=0,
     )
 
 
