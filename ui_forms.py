@@ -163,7 +163,7 @@ def render_custom_company_form() -> tuple[Company | None, HistoricalFinancials |
 
 def build_wacc_inputs_for_company(
     hist, summary, company: Company, rf: float, beta_val: float, erp: float, kd: float,
-    kd_estimate: CostOfDebtEstimate | None = None,
+    kd_estimate: CostOfDebtEstimate | None = None, risk_free_rate_rationale: str | None = None,
 ) -> WaccInputs:
     """
     Generic WACC-input builder that works for any company (sample or custom-entered),
@@ -206,6 +206,7 @@ def build_wacc_inputs_for_company(
         market_value_of_debt=mv_debt,
         pretax_cost_of_debt_source=AssumptionSource.CALCULATED if kd_estimate is not None else None,
         pretax_cost_of_debt_rationale=kd_estimate.rationale if kd_estimate is not None else None,
+        risk_free_rate_rationale=risk_free_rate_rationale,
     )
 
 

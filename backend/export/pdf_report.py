@@ -46,6 +46,7 @@ BULL_COLOR = "#22C55E"
 HISTORICAL_COLOR = "#9C97D6"  # ui_theme.MUTED - same role (historical series) as the web charts
 FORECAST_COLOR = "#2A1FB0"    # ui_theme.NAVY_LIGHT - same role (forecast series) as the web charts
 
+from ..common import currency_format
 from ..engine.forecast import ForecastResult
 from ..engine.historical import HistoricalSummary
 from ..engine.models import Company, HistoricalFinancials
@@ -76,10 +77,13 @@ def _esc(text: str) -> str:
     return str(text).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
-def _money(x: float | None, label: str, suffix: str = "M") -> str:
-    if x is None:
-        return "n/a"
-    return f"{label} {round(x):,}{suffix}"
+def _money(x: float | None, currency: str, country: str, label: str, suffix: str = "M") -> str:
+    """A whole-company monetary figure: Crore/Lakh for India, Millions elsewhere - delegates
+    the actual scale math to currency_format so the UI and this report can never disagree on
+    it, while keeping `label` (an ASCII-safe symbol like "Rs.") instead of a Unicode glyph
+    reportlab's base font can't render. `suffix` is unused outside the non-India path, kept
+    only for call-site compatibility."""
+    return currency_format.format_scaled_money(x, currency, country, symbol_override=label)
 
 
 def _per_share(x: float | None, label: str) -> str:
@@ -254,8 +258,9 @@ def generate_investment_report(
         f"{_esc(company.ticker or '')}  -  DCF Valuation &amp; Investment Summary",
         ParagraphStyle("HeroSub", fontSize=11.5, textColor=colors.HexColor("#B7AEF0"), fontName="Helvetica-Bold", leading=15),
     )
+    _scale_note = "Crore/Lakh" if currency_format.is_india(company.currency, company.country) else "Millions"
     hero_meta = Paragraph(
-        f"Company type: {_esc(company.company_type.value.title())} &nbsp;|&nbsp; Currency: {_esc(company.currency)} ({_esc(company.units)}) "
+        f"Company type: {_esc(company.company_type.value.title())} &nbsp;|&nbsp; Currency: {_esc(company.currency)} ({_scale_note}) "
         f"&nbsp;|&nbsp; Industry: {_esc(company.industry or 'n/a')} &nbsp;|&nbsp; Historical period: {hist.periods[0]}-{hist.periods[-1]}",
         ParagraphStyle("HeroMeta", fontSize=8.5, textColor=colors.HexColor("#9C97D6"), leading=12),
     )
@@ -288,8 +293,8 @@ def generate_investment_report(
 
     hero_row1 = Table(
         [[
-            _hero_metric("ENTERPRISE VALUE", _money(valuation.enterprise_value, label)),
-            _hero_metric("EQUITY VALUE", _money(valuation.equity_bridge.equity_value, label)),
+            _hero_metric("ENTERPRISE VALUE", _money(valuation.enterprise_value, company.currency, company.country, label)),
+            _hero_metric("EQUITY VALUE", _money(valuation.equity_bridge.equity_value, company.currency, company.country, label)),
             _hero_metric("IMPLIED SHARE PRICE", _per_share(per_share, label), accent=True),
             _hero_metric("CURRENT SHARE PRICE", _per_share(price, label)),
         ]],
@@ -346,8 +351,9 @@ def generate_investment_report(
         )
     else:
         view_text = (
-            f"The Base Case DCF valuation implies an Enterprise Value of {_money(valuation.enterprise_value, label)} "
-            f"and an Equity Value of {_money(valuation.equity_bridge.equity_value, label)}."
+            f"The Base Case DCF valuation implies an Enterprise Value of "
+            f"{_money(valuation.enterprise_value, company.currency, company.country, label)} "
+            f"and an Equity Value of {_money(valuation.equity_bridge.equity_value, company.currency, company.country, label)}."
         )
     story.append(Paragraph(view_text, body))
 
@@ -388,8 +394,8 @@ def generate_investment_report(
         ("Terminal EBITDA Margin", lambda s: _pct(s.forecast.years[-1].ebitda_margin)),
         ("WACC", lambda s: _pct(s.wacc_result.wacc)),
         ("Terminal Growth", lambda s: _pct(s.terminal_growth)),
-        ("Enterprise Value", lambda s: _money(s.valuation.enterprise_value, label)),
-        ("Equity Value", lambda s: _money(s.valuation.equity_bridge.equity_value, label)),
+        ("Enterprise Value", lambda s: _money(s.valuation.enterprise_value, company.currency, company.country, label)),
+        ("Equity Value", lambda s: _money(s.valuation.equity_bridge.equity_value, company.currency, company.country, label)),
     ]
     sc_rows = [["Metric", "Bear", "Base", "Bull"]] + [[m] + [fn(scenarios[n]) for n in names] for m, fn in metric_defs]
     t2 = Table(sc_rows, colWidths=[2 * inch] + [1.3 * inch] * 3)

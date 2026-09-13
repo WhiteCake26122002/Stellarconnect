@@ -21,6 +21,10 @@ import plotly.graph_objects as go
 import streamlit as st
 
 import ui_theme
+from backend.common import currency_format
+from backend.common.live_beta import get_live_beta
+from backend.data.risk_free_rates import resolve_risk_free_rate
+from backend.data.terminal_growth_norms import terminal_growth_norms
 from backend.engine.assumption_utils import shift_assumption
 from backend.engine.cost_of_debt import estimate_pretax_cost_of_debt
 from backend.engine.forecast import build_default_assumptions, project_financials
@@ -65,28 +69,29 @@ SOURCE_COLORS = {
 }
 
 
-CURRENCY_SYMBOLS = {"USD": "$", "INR": "₹", "EUR": "€", "GBP": "£", "JPY": "¥", "CNY": "¥"}
+currency_symbol = currency_format.currency_symbol
 
 
-def currency_symbol(currency_code: str) -> str:
-    return CURRENCY_SYMBOLS.get((currency_code or "USD").upper(), (currency_code or "USD").upper() + " ")
-
-
-def money(x, suffix="M"):
-    if x is None:
-        return "n/a"
-    return f"{CURRENCY_SYMBOL}{round(x):,}{suffix}"
+def money(x, suffix=None):
+    """A whole-company monetary figure, in Crore/Lakh for India or Millions elsewhere.
+    `suffix` is accepted for call-site compatibility but ignored - the scale is now
+    chosen by currency/country, not a fixed caller-supplied unit."""
+    return currency_format.format_scaled_money(x, COMPANY_CURRENCY, COMPANY_COUNTRY)
 
 
 def per_share_fmt(x):
-    if x is None:
-        return "n/a"
-    return f"{CURRENCY_SYMBOL}{x:,.2f}"
+    return currency_format.format_per_share(x, COMPANY_CURRENCY)
 
 
 def r0(x):
-    """Round a monetary (millions-scale) value to the nearest whole unit for display."""
-    return None if x is None else round(x)
+    """Round a monetary (millions-scale) value to the local table/chart display scale - a
+    fixed divisor per company (Crore for India, Millions elsewhere; see SCALE_DIVISOR below),
+    unlike money()'s per-value Crore/Lakh switching which only makes sense for a single
+    standalone figure, not a column of line items that need one shared scale."""
+    if x is None:
+        return None
+    scaled = x / SCALE_DIVISOR
+    return round(scaled, 2) if SCALE_DIVISOR != 1 else round(scaled)
 
 
 def pct(x):
@@ -117,7 +122,16 @@ else:
     st.success(f"Using your entered data for **{company.name}**: scroll down or check the sidebar to run the valuation.")
 
 summary = analyze_historicals(hist)
+COMPANY_CURRENCY = company.currency
+COMPANY_COUNTRY = company.country
 CURRENCY_SYMBOL = currency_symbol(company.currency)
+SCALE_LABEL = currency_format.scale_label(company.currency, company.country)
+# Tables/charts (unlike standalone KPI figures) need ONE fixed scale for every line item
+# rather than money()'s per-value Crore/Lakh switching - real Indian financial statements
+# are conventionally shown "all figures in Rs. Crore", never switching units row to row.
+_IS_INDIA = currency_format.is_india(company.currency, company.country)
+SCALE_DIVISOR = currency_format.CRORE_IN_MILLIONS if _IS_INDIA else 1.0
+TABLE_SCALE_LABEL = f"{CURRENCY_SYMBOL} Crore" if _IS_INDIA else f"{CURRENCY_SYMBOL} Millions"
 
 # ---------------------------------------------------------------- Sidebar --
 st.sidebar.title("DCF Assumptions")
@@ -144,15 +158,27 @@ target_ebitda_margin = st.sidebar.slider(
 ) / 100
 
 st.sidebar.subheader("WACC Inputs")
-_beta_default = min(3.0, max(0.3, sector_match.levered_beta)) if sector_match else 1.15
+_live_beta = None if sector_match else get_live_beta(company.ticker or "")
+if sector_match:
+    _beta_default = min(3.0, max(0.3, sector_match.levered_beta))
+elif _live_beta is not None:
+    _beta_default = min(3.0, max(0.3, _live_beta))
+else:
+    _beta_default = 1.15
 _erp_default = min(15.0, max(0.0, country_risk.total_equity_risk_premium * 100)) if country_risk else 5.5
 if sector_match:
     st.sidebar.caption(f"Beta default sourced from Damodaran India sector data ({sector_match.matched_industry}).")
+elif _live_beta is not None:
+    st.sidebar.caption(f"Beta default sourced from Yahoo Finance's own reported beta for {company.ticker} (5-year regression).")
+else:
+    st.sidebar.caption("No sourced beta available for this company/market - enter a comparable-company beta estimate manually.")
 if country_risk:
     st.sidebar.caption(f"ERP default sourced from Damodaran country risk data ({country_risk.country}).")
 
+_rf_default_pct, _rf_source = resolve_risk_free_rate(company.currency)
+st.sidebar.caption(f"Risk-free rate default: {_rf_source}.")
 risk_free_rate = st.sidebar.slider(
-    "Risk-free rate", 0.0, 15.0, 4.2, 0.1, format="%.1f%%", key=f"rf_{_widget_scope}",
+    "Risk-free rate", 0.0, 15.0, round(_rf_default_pct * 100, 1), 0.1, format="%.1f%%", key=f"rf_{_widget_scope}",
     help="The base rate in CAPM, typically a long-term government bond yield in the company's home currency.",
 ) / 100
 beta = st.sidebar.number_input(
@@ -185,8 +211,13 @@ if company.company_type == CompanyType.PRIVATE and "custom_target_equity_weight"
     st.session_state["custom_target_equity_weight"] = 0.70
 
 st.sidebar.subheader("Terminal Value")
+_tg_default, _tg_ceiling = terminal_growth_norms(company.currency)
+st.sidebar.caption(
+    f"Default {_tg_default:.1%} and conservative ceiling {_tg_ceiling:.1%} for this currency - a mature company's "
+    "perpetual growth rate should approximate long-run nominal GDP growth, not exceed it indefinitely."
+)
 terminal_growth = st.sidebar.slider(
-    "Terminal growth rate (g)", 0.0, 6.0, 3.0, 0.1, format="%.1f%%", key=f"tg_{_widget_scope}",
+    "Terminal growth rate (g)", 0.0, 6.0, _tg_default * 100, 0.1, format="%.1f%%", key=f"tg_{_widget_scope}",
     help="The perpetual growth rate applied after the explicit forecast, in the Gordon Growth terminal value. Must stay below WACC.",
 ) / 100
 exit_multiple = st.sidebar.number_input(
@@ -203,9 +234,15 @@ base_assumptions = build_default_assumptions(
 )
 
 st.title("DCF Valuation & Financial Analysis")
+# A literal "$" in st.caption's markdown gets parsed as a LaTeX math delimiter (garbling
+# anything between two of them, which this caption has for a USD company) - escape it so
+# the currency symbol renders as plain text instead of opening a math block.
+_md_escape_dollar = lambda s: s.replace("$", "\\$")
 st.caption(
-    f"Company type: **{company.company_type.value.title()}** | Currency: **{company.currency} ({company.units})** | "
-    f"Historical period: **{hist.periods[0]}-{hist.periods[-1]}**"
+    f"Company type: **{company.company_type.value.title()}** | Currency: **{company.currency}** | "
+    f"Historical period: **{hist.periods[0]}-{hist.periods[-1]}** | "
+    f"Standalone figures shown in **{_md_escape_dollar(SCALE_LABEL)}**, "
+    f"tables/charts in **{_md_escape_dollar(TABLE_SCALE_LABEL)}** (per-share prices are never scaled)"
 )
 
 tabs = st.tabs(
@@ -242,7 +279,10 @@ for i, row in edited_df.iterrows():
 
 forecast = project_financials(hist, assumptions)
 
-wacc_inputs = build_wacc_inputs_for_company(hist, summary, company, risk_free_rate, beta, equity_risk_premium, pretax_cost_of_debt, kd_estimate=_kd_estimate)
+wacc_inputs = build_wacc_inputs_for_company(
+    hist, summary, company, risk_free_rate, beta, equity_risk_premium, pretax_cost_of_debt,
+    kd_estimate=_kd_estimate, risk_free_rate_rationale=_rf_source,
+)
 wacc_result = calculate_wacc(wacc_inputs)
 
 latest_bs = hist.balance_sheets[-1]
@@ -311,10 +351,10 @@ with tabs[0]:
             with st.container(border=True):
                 st.subheader("Historical vs. Forecast Revenue")
                 fig = go.Figure()
-                fig.add_bar(x=hist.periods, y=[i.revenue for i in hist.income_statements], name="Historical", marker_color=ui_theme.HISTORICAL)
-                fig.add_bar(x=[y.period for y in forecast.years], y=[y.revenue for y in forecast.years], name="Forecast", marker_color=ui_theme.FORECAST)
+                fig.add_bar(x=hist.periods, y=[i.revenue / SCALE_DIVISOR for i in hist.income_statements], name="Historical", marker_color=ui_theme.HISTORICAL)
+                fig.add_bar(x=[y.period for y in forecast.years], y=[y.revenue / SCALE_DIVISOR for y in forecast.years], name="Forecast", marker_color=ui_theme.FORECAST)
                 fig.add_vline(x=len(hist.periods) - 0.5, line_dash="dot", line_color=ui_theme.MUTED)
-                ui_theme.base_layout(fig, yaxis_title=f"Revenue ({CURRENCY_SYMBOL}M)", bargap=0.25)
+                ui_theme.base_layout(fig, yaxis_title=f"Revenue ({TABLE_SCALE_LABEL})", bargap=0.25)
                 st.plotly_chart(fig, use_container_width=True)
 
         with col_b:
@@ -338,7 +378,7 @@ with tabs[0]:
 
 # --------------------------------------------------------------- Financials
 with tabs[1]:
-    st.subheader("Historical Income Statement")
+    st.subheader(f"Historical Income Statement ({TABLE_SCALE_LABEL})")
     is_df = pd.DataFrame(
         {
             "Period": hist.periods,
@@ -353,7 +393,7 @@ with tabs[1]:
     ).set_index("Period").T
     st.dataframe(is_df, use_container_width=True)
 
-    st.subheader("Historical Balance Sheet")
+    st.subheader(f"Historical Balance Sheet ({TABLE_SCALE_LABEL})")
     bs_df = pd.DataFrame(
         {
             "Period": hist.periods,
@@ -367,7 +407,7 @@ with tabs[1]:
     ).set_index("Period").T
     st.dataframe(bs_df, use_container_width=True)
 
-    st.subheader("Historical Cash Flow Statement")
+    st.subheader(f"Historical Cash Flow Statement ({TABLE_SCALE_LABEL})")
     cf_df = pd.DataFrame(
         {
             "Period": hist.periods,
@@ -408,7 +448,7 @@ with tabs[2]:
 
 # --------------------------------------------------------------- Forecast
 with tabs[3]:
-    st.subheader("Revenue, Margin & FCFF Forecast")
+    st.subheader(f"Revenue, Margin & FCFF Forecast ({TABLE_SCALE_LABEL})")
     fc_df = pd.DataFrame(
         {
             "Period": [y.period for y in forecast.years],
@@ -426,12 +466,12 @@ with tabs[3]:
     st.dataframe(fc_df, use_container_width=True)
 
     st.subheader("FCFF Build")
-    fcff_vals = [y.fcff for y in forecast.years]
+    fcff_vals = [y.fcff / SCALE_DIVISOR for y in forecast.years]
     fig3 = go.Figure(go.Bar(
         x=[y.period for y in forecast.years], y=fcff_vals,
         marker_color=[ui_theme.BULL if v >= 0 else ui_theme.BEAR for v in fcff_vals],
     ))
-    ui_theme.base_layout(fig3, height=300, yaxis_title=f"Unlevered FCF ({CURRENCY_SYMBOL}M)")
+    ui_theme.base_layout(fig3, height=300, yaxis_title=f"Unlevered FCF ({TABLE_SCALE_LABEL})")
     st.plotly_chart(fig3, use_container_width=True)
 
     st.info(base_assumptions.revenue_growth[0].rationale)
@@ -448,7 +488,7 @@ with tabs[4]:
         w3.metric("WACC", pct(wacc_result.wacc))
         st.caption(f"Equity weight {pct(wacc_result.equity_weight)} / Debt weight {pct(wacc_result.debt_weight)}")
 
-        st.subheader("Discounted Cash Flows")
+        st.subheader(f"Discounted Cash Flows ({TABLE_SCALE_LABEL})")
         dcf_df = pd.DataFrame(
             {
                 "Period": [d.period for d in valuation.discounted_years],
@@ -476,7 +516,7 @@ with tabs[4]:
             ("- Preferred Stock", r0(-valuation.equity_bridge.less_preferred_stock)),
             ("= Equity Value", r0(valuation.equity_bridge.equity_value)),
         ]
-        st.dataframe(pd.DataFrame(bridge_rows, columns=["Line Item", f"Value ({CURRENCY_SYMBOL}M)"]), use_container_width=True, hide_index=True)
+        st.dataframe(pd.DataFrame(bridge_rows, columns=["Line Item", f"Value ({TABLE_SCALE_LABEL})"]), use_container_width=True, hide_index=True)
 
 # ----------------------------------------------------------------- Scenarios
 with tabs[5]:
@@ -566,6 +606,15 @@ with tabs[6]:
 with tabs[7]:
     st.subheader("All Forecast Assumptions")
     st.caption("Yellow = user override | Gray = model-calculated | Blue/Green/Purple = historical/guidance/market data")
+    st.info(
+        "This model forecasts revenue as a single consolidated figure, not a sum of business "
+        "segments. Yahoo Finance (this app's only data source) does not expose segment-level "
+        "revenue for any company, and no other free, structured source exists - real segment "
+        "breakdowns only appear in annual-report PDFs/investor decks. If you have a segment "
+        "revenue split from the company's own reporting, the closest approximation available "
+        "here is to weight the 'Long-term revenue growth' sidebar input toward your own blended "
+        "segment-growth expectation."
+    )
     a = assumptions
     all_a = a.revenue_growth + a.gross_margin + a.rnd_pct_revenue + a.sm_pct_revenue + a.ga_pct_revenue + a.da_pct_revenue + a.capex_pct_revenue + a.nwc_pct_revenue + a.tax_rate
     assum_df = pd.DataFrame(
@@ -601,7 +650,7 @@ with tabs[8]:
     if valuation_error:
         st.error(valuation_error)
     else:
-        integrity = run_validation(hist, summary, forecast, wacc_result, valuation)
+        integrity = run_validation(hist, summary, forecast, wacc_result, valuation, terminal_growth_ceiling=_tg_ceiling)
         st.markdown(ui_theme.integrity_meter_html(integrity.score, integrity.max_score, integrity.band), unsafe_allow_html=True)
         st.write("")
         for issue in integrity.issues:
@@ -631,7 +680,7 @@ with tabs[9]:
             st.markdown("**Excel Workbook**")
             st.caption("15 sheets, fully formula-driven: Exec Summary, Historical IS/BS/CF, Historical Analysis, WACC, Forecast & FCFF and DCF for Base/Bear/Bull, Scenario Summary, Sensitivity, Sources & Notes. Edit any yellow input cell in Excel and the model recalculates.")
             if st.button("Generate Excel Workbook"):
-                integrity = run_validation(hist, summary, forecast, wacc_result, valuation)
+                integrity = run_validation(hist, summary, forecast, wacc_result, valuation, terminal_growth_ceiling=_tg_ceiling)
                 ctx = ValuationContext(
                     cash_and_investments=latest_bs.total_cash_and_investments, total_debt=latest_bs.total_debt,
                     lease_liabilities=latest_bs.lease_liabilities, exit_multiple=exit_multiple,
@@ -665,7 +714,7 @@ with tabs[9]:
             st.markdown("**Investment Report (PDF)**")
             st.caption("A short, readable report: valuation summary, investment view, key drivers & risks, scenarios, sensitivity, and assumptions.")
             if st.button("Generate Investment Report"):
-                integrity = run_validation(hist, summary, forecast, wacc_result, valuation)
+                integrity = run_validation(hist, summary, forecast, wacc_result, valuation, terminal_growth_ceiling=_tg_ceiling)
                 ctx = ValuationContext(
                     cash_and_investments=latest_bs.total_cash_and_investments, total_debt=latest_bs.total_debt,
                     lease_liabilities=latest_bs.lease_liabilities, exit_multiple=exit_multiple,

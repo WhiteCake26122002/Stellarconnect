@@ -36,6 +36,7 @@ def run_validation(
     forecast: ForecastResult,
     wacc_result: WaccResult,
     valuation: DCFValuationResult,
+    terminal_growth_ceiling: float = 0.06,
 ) -> IntegrityReport:
     issues: list[ValidationIssue] = []
     score = 100
@@ -102,8 +103,17 @@ def run_validation(
         issues.append(ValidationIssue(severity="error", message=f"WACC ({wacc_result.wacc:.2%}) must exceed terminal growth ({valuation.terminal_growth:.2%})."))
         score -= 30
 
-    if valuation.terminal_growth > 0.06:
-        issues.append(ValidationIssue(severity="warning", message=f"Terminal growth of {valuation.terminal_growth:.2%} exceeds typical long-run nominal GDP growth; confirm this is defensible."))
+    if valuation.terminal_growth > terminal_growth_ceiling:
+        issues.append(
+            ValidationIssue(
+                severity="warning",
+                message=(
+                    f"Terminal growth of {valuation.terminal_growth:.2%} exceeds the {terminal_growth_ceiling:.1%} "
+                    "conservative ceiling for this company's market (a mature company's perpetual growth rate "
+                    "should approximate long-run nominal GDP growth); confirm this is defensible."
+                ),
+            )
+        )
         score -= 10
 
     for y in forecast.years:

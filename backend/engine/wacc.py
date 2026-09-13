@@ -86,6 +86,7 @@ def make_wacc_inputs(
     source_date: str = "",
     pretax_cost_of_debt_source: AssumptionSource | None = None,
     pretax_cost_of_debt_rationale: str | None = None,
+    risk_free_rate_rationale: str | None = None,
 ) -> WaccInputs:
     """Convenience constructor that stamps the right AssumptionSource per company type (spec section 13)."""
     market_source = AssumptionSource.MARKET_DATA if company_type == CompanyType.PUBLIC else AssumptionSource.USER_ASSUMPTION
@@ -98,7 +99,7 @@ def make_wacc_inputs(
             source=AssumptionSource.MARKET_DATA,
             source_date=source_date,
             confidence=Confidence.HIGH,
-            rationale="10-year government bond yield as of the source date.",
+            rationale=risk_free_rate_rationale or "10-year government bond yield as of the source date.",
         ),
         beta=Assumption(
             name="Beta",
