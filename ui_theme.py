@@ -509,6 +509,19 @@ def inject_css() -> None:
         .wl-chg.down {{ background: {BEAR_SOFT}; color: {BEAR}; }}
         .wl-chg.flat {{ color: {MUTED_2}; }}
 
+        /* ---- Search result rows (DCF search, Paper Trading search-and-trade) ---- */
+        .src-row {{ display: flex; align-items: center; gap: 12px; padding: 6px 2px; }}
+        .src-avatar {{ width: 34px; height: 34px; border-radius: 50%; background: {NAVY_LIGHT}22; color: {NAVY_LIGHT};
+            display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 0.85rem; flex-shrink: 0; }}
+        .src-id {{ flex: 1; min-width: 0; }}
+        .src-name {{ font-weight: 600; color: {INK}; font-size: 0.9rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }}
+        .src-meta {{ display: flex; align-items: center; gap: 8px; margin-top: 2px; }}
+        .src-symbol {{ font-family: 'IBM Plex Mono', monospace; font-size: 0.72rem; color: {MUTED}; }}
+        .src-exchange {{ font-size: 0.66rem; color: {MUTED_2}; background: {PANEL_RAISED}; padding: 1px 6px; border-radius: 4px; }}
+        .src-price-block {{ text-align: right; flex-shrink: 0; }}
+        .src-price {{ font-family: 'IBM Plex Mono', monospace; font-weight: 700; color: {INK}; font-size: 0.88rem; }}
+        .src-chg-row {{ margin-top: 2px; }}
+
         /* ---- Cosmic component primitives (gravity well, orbit, cluster) -------- */
         @keyframes dcf-spin {{ to {{ transform: rotate(360deg); }} }}
         @keyframes dcf-breathe {{ 0%, 100% {{ opacity: .55; }} 50% {{ opacity: 1; }} }}
@@ -1023,6 +1036,39 @@ def watchlist_row_html(
         <div class="wl-spark">{spark_html}</div>
         <div class="wl-price">{price}</div>
         <div class="wl-change">{chg_html}</div>
+    </div>
+    """)
+
+
+def search_result_row_html(
+    name: str, symbol: str, exchange: str, price: str | None = None, change_pct: float | None = None,
+) -> str:
+    """
+    A single company-search result: letter avatar, name + ticker + exchange badge, and
+    (when known) a live price and colored change - the same row styling wherever a search box
+    turns free text into a specific company, so the DCF search and the Paper Trading
+    search-and-trade panel read as one design language instead of two different search UIs.
+
+    The action buttons themselves (Buy/Sell/Chart/Select) are real Streamlit widgets placed by
+    the caller next to this row's markdown, since this module only ever returns static HTML.
+    """
+    initial = (symbol or name or "?")[:1].upper()
+    price_html = ""
+    if price is not None:
+        if change_pct is None:
+            chg_html = ""
+        else:
+            cls = "up" if change_pct >= 0 else "down"
+            chg_html = f'<span class="wl-chg {cls}">{"+" if change_pct >= 0 else ""}{change_pct:.2f}%</span>'
+        price_html = f'<div class="src-price">{price}</div><div class="src-chg-row">{chg_html}</div>'
+    return _flatten_html(f"""
+    <div class="src-row">
+        <div class="src-avatar">{initial}</div>
+        <div class="src-id">
+            <div class="src-name">{name}</div>
+            <div class="src-meta"><span class="src-symbol">{symbol}</span><span class="src-exchange">{exchange}</span></div>
+        </div>
+        <div class="src-price-block">{price_html}</div>
     </div>
     """)
 

@@ -11,6 +11,7 @@ from __future__ import annotations
 import pandas as pd
 import streamlit as st
 
+import ui_theme
 from backend.engine.models import (
     BalanceSheet,
     CashFlowStatement,
@@ -243,9 +244,23 @@ def render_live_company_form() -> tuple[Company | None, HistoricalFinancials | N
     if query.strip():
         matches = search_companies(query.strip())
         if matches:
-            options = {f"{m['name']} ({m['symbol']}) - {m['exchange']}": m["symbol"] for m in matches}
-            choice = st.selectbox("Matching companies", list(options.keys()), key="dcf_company_choice")
-            ticker = options[choice]
+            st.caption("Matching companies:")
+            for m in matches:
+                with st.container(border=True):
+                    row_col, btn_col = st.columns([4, 1])
+                    with row_col:
+                        st.markdown(
+                            ui_theme.search_result_row_html(m["name"], m["symbol"], m["exchange"]),
+                            unsafe_allow_html=True,
+                        )
+                    with btn_col:
+                        if st.button("Select", key=f"dcf_select_{m['symbol']}", use_container_width=True):
+                            st.session_state["dcf_selected_ticker"] = m["symbol"]
+                            st.rerun()
+            selected = st.session_state.get("dcf_selected_ticker", "")
+            if selected in {m["symbol"] for m in matches}:
+                ticker = selected
+                st.success(f"Selected **{selected}**. Click Fetch Company Data below to continue.")
         else:
             st.caption("No matches yet - keep typing, or enter the exact ticker (e.g. TCS.NS) directly.")
             ticker = query.strip()

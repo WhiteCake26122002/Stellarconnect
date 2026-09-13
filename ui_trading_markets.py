@@ -13,12 +13,15 @@ tick-real-time - same framing the rest of Paper Trading already uses.
 """
 from __future__ import annotations
 
+import datetime as dt
+
 import pandas as pd
 import streamlit as st
 from streamlit_autorefresh import st_autorefresh
 from streamlit_lightweight_charts import renderLightweightCharts
 
 import ui_theme
+from backend.common.company_search import search_companies
 from backend.trading import store
 from backend.trading import technical_indicators as ti
 from backend.trading.index_constituents import INDEX_CSV_URLS, get_index_constituents
@@ -64,7 +67,92 @@ def _render_mover_row(row: MoverRow) -> None:
                 st.rerun()
 
 
+def _render_search_and_trade(user_key: str, cash: float) -> None:
+    """
+    A broker-style search box: type a company, get back rows with a live price and three
+    actions - Buy/Sell execute inline right under that row (no navigation), Chart jumps into
+    the same stock-detail view the movers list's own "View Chart" button uses. Buy/Sell open
+    an inline quantity+confirm control rather than executing instantly, mirroring how a real
+    broker's search result opens an order ticket instead of firing an order on one click.
+    """
+    st.markdown('<div class="pt-section-label">Search & Trade</div>', unsafe_allow_html=True)
+    query = st.text_input(
+        "Search company", key="mkt_search_query", placeholder="e.g. Reliance, TCS, Infosys",
+        label_visibility="collapsed",
+    )
+    if not query.strip():
+        return
+
+    matches = search_companies(query.strip())
+    if not matches:
+        st.caption("No matches yet - keep typing, or try the exact ticker.")
+        return
+
+    quotes = get_live_quotes(tuple(m["symbol"] for m in matches))
+    active_side, active_symbol = st.session_state.get("mkt_search_action", (None, None))
+
+    for m in matches:
+        symbol = m["symbol"]
+        q = quotes.get(symbol)
+        live_price = q["price"] if q else None
+        with st.container(border=True):
+            row_col, action_col = st.columns([3, 1.8])
+            with row_col:
+                st.markdown(
+                    ui_theme.search_result_row_html(
+                        m["name"], symbol, m["exchange"],
+                        price=f"Rs. {live_price:,.2f}" if live_price else None,
+                        change_pct=(q["change_pct"] * 100) if q else None,
+                    ),
+                    unsafe_allow_html=True,
+                )
+            with action_col:
+                bcol, scol, ccol = action_col.columns(3)
+                if bcol.button("Buy", key=f"srch_buy_{symbol}", use_container_width=True, type="primary"):
+                    st.session_state["mkt_search_action"] = ("buy", symbol)
+                    st.rerun()
+                if scol.button("Sell", key=f"srch_sell_{symbol}", use_container_width=True):
+                    st.session_state["mkt_search_action"] = ("sell", symbol)
+                    st.rerun()
+                if ccol.button("Chart", key=f"srch_chart_{symbol}", use_container_width=True):
+                    st.session_state["mkt_selected_ticker"] = symbol
+                    st.session_state["mkt_selected_name"] = m["name"]
+                    st.session_state.pop("mkt_search_action", None)
+                    st.rerun()
+
+            if active_symbol == symbol:
+                qc1, qc2, qc3 = st.columns([1, 1.4, 1])
+                qty = qc1.number_input(
+                    "Qty", min_value=0.0, value=1.0, step=1.0, key=f"srch_qty_{symbol}",
+                    label_visibility="collapsed",
+                )
+                with qc2:
+                    if live_price and qty > 0:
+                        st.caption(f"Order value: Rs. {qty * live_price:,.2f} (cash: Rs. {cash:,.2f})")
+                    elif not live_price:
+                        st.caption("No live price available right now.")
+                confirm_label = "Confirm Buy" if active_side == "buy" else "Confirm Sell"
+                if qc3.button(
+                    confirm_label, key=f"srch_confirm_{symbol}", use_container_width=True,
+                    type="primary" if active_side == "buy" else "secondary",
+                    disabled=not (live_price and qty > 0),
+                ):
+                    try:
+                        if active_side == "buy":
+                            store.execute_buy(user_key, symbol, qty, live_price)
+                        else:
+                            store.execute_sell(user_key, symbol, qty, live_price)
+                        verb = "Bought" if active_side == "buy" else "Sold"
+                        st.toast(f"{verb} {qty:g} {symbol} at Rs. {live_price:,.2f}", icon="✅")
+                        st.session_state.pop("mkt_search_action", None)
+                        st.rerun()
+                    except store.TradeError as e:
+                        st.error(str(e))
+
+
 def render_movers_tab(user_key: str, cash: float) -> None:
+    _render_search_and_trade(user_key, cash)
+    st.divider()
     st.markdown('<div class="pt-section-label">Market Movers</div>', unsafe_allow_html=True)
     st.caption(
         "Gainers/losers refresh every ~1 minute for smaller indices and every ~5 minutes for "
@@ -150,7 +238,10 @@ def _render_indicator_controls() -> dict:
     }
 
 
-def _build_charts(hist: pd.DataFrame, timeframe: str, indicators: dict) -> list[dict]:
+def _build_charts(
+    hist: pd.DataFrame, timeframe: str, indicators: dict,
+    transactions: list | None = None, avg_cost: float | None = None,
+) -> list[dict]:
     time_col = "Date" if "Date" in hist.columns else "Datetime"
     is_intraday = timeframe not in ("1D", "1W", "1M")
     times = hist[time_col]
@@ -162,6 +253,20 @@ def _build_charts(hist: pd.DataFrame, timeframe: str, indicators: dict) -> list[
         {"time": t(row[time_col]), "open": row["Open"], "high": row["High"], "low": row["Low"], "close": row["Close"]}
         for _, row in hist.iterrows()
     ]
+
+    # Past trades on this ticker, rendered as arrows directly on the candle they filled at -
+    # the component has no separate "annotations" layer, but its series-level `markers` does
+    # exactly this (verified against the installed build before relying on it).
+    markers = []
+    for txn in (transactions or []):
+        is_buy = txn.side == "BUY"
+        markers.append({
+            "time": t(dt.datetime.fromisoformat(txn.timestamp)),
+            "position": "belowBar" if is_buy else "aboveBar",
+            "color": ui_theme.BULL if is_buy else ui_theme.BEAR,
+            "shape": "arrowUp" if is_buy else "arrowDown",
+            "text": f"{txn.side} {txn.quantity:g} @ {txn.price:,.2f}",
+        })
 
     overlays = []
     show_sma, sma_period = indicators["sma"]
@@ -180,19 +285,29 @@ def _build_charts(hist: pd.DataFrame, timeframe: str, indicators: dict) -> list[
         overlays.append(_line_series(times, mid, ui_theme.MUTED_2, is_intraday, width=1))
         overlays.append(_line_series(times, lower, ui_theme.MUTED, is_intraday, width=1))
 
+    if avg_cost is not None and len(times) > 0:
+        # No native horizontal price-line API in this build (checked before relying on it) -
+        # a flat two-point Line series across the visible range reads the same way visually.
+        overlays.append({
+            "type": "Line",
+            "data": [{"time": t(times.iloc[0]), "value": avg_cost}, {"time": t(times.iloc[-1]), "value": avg_cost}],
+            "options": {"color": ui_theme.MUTED_2, "lineWidth": 1, "lineStyle": 2},
+        })
+
+    candlestick_series = {
+        "type": "Candlestick",
+        "data": candles,
+        "options": {
+            "upColor": ui_theme.BULL, "downColor": ui_theme.BEAR, "borderVisible": False,
+            "wickUpColor": ui_theme.BULL, "wickDownColor": ui_theme.BEAR,
+        },
+    }
+    if markers:
+        candlestick_series["markers"] = markers
+
     main_chart = {
         "chart": {**_chart_base_options(420), "crosshair": {"mode": 0}},
-        "series": [
-            {
-                "type": "Candlestick",
-                "data": candles,
-                "options": {
-                    "upColor": ui_theme.BULL, "downColor": ui_theme.BEAR, "borderVisible": False,
-                    "wickUpColor": ui_theme.BULL, "wickDownColor": ui_theme.BEAR,
-                },
-            },
-            *overlays,
-        ],
+        "series": [candlestick_series, *overlays],
     }
     charts = [main_chart]
 
@@ -226,40 +341,44 @@ def _build_charts(hist: pd.DataFrame, timeframe: str, indicators: dict) -> list[
     return charts
 
 
-def _render_order_panel(user_key: str, cash: float, ticker: str, live_price: float | None) -> None:
-    st.markdown('<div class="pt-section-label">Place an Order</div>', unsafe_allow_html=True)
+def _render_order_toolbar(user_key: str, cash: float, ticker: str, live_price: float | None):
+    """A compact Qty | Buy | Sell row that sits directly above the chart, like a broker's own
+    chart toolbar, instead of a full order panel scrolled below it. Returns the caller's
+    current Holding in this ticker (or None) so render_stock_detail can pass the average cost
+    straight into the chart's reference line without a second store lookup."""
     holdings = {h.ticker: h for h in store.get_holdings(user_key)}
     held = holdings.get(ticker)
 
-    c1, c2, c3 = st.columns([1, 1, 2])
-    c1.metric("Live Price", f"Rs. {live_price:,.2f}" if live_price else "n/a")
-    qty = c2.number_input("Quantity", min_value=0.0, value=0.0, step=1.0, key=f"mkt_qty_{ticker}")
-    with c3:
-        if held:
-            unrealized = (live_price - held.avg_cost) * held.quantity if live_price else None
-            unrealized_note = f" - unrealized P&L Rs. {unrealized:,.2f}" if unrealized is not None else ""
-            st.caption(f"Current position: {held.quantity:g} @ avg Rs. {held.avg_cost:,.2f}{unrealized_note}")
-        else:
-            st.caption("No existing position in this stock.")
-        if live_price and qty > 0:
-            st.caption(f"Order value: Rs. {qty * live_price:,.2f} (cash available: Rs. {cash:,.2f})")
-
+    tc1, tc2, tc3, tc4 = st.columns([1.1, 0.8, 0.8, 2.3])
+    qty = tc1.number_input(
+        "Quantity", min_value=0.0, value=0.0, step=1.0, key=f"mkt_qty_{ticker}",
+        label_visibility="collapsed", placeholder="Qty",
+    )
     can_trade = bool(live_price) and qty > 0
-    bcol, scol = st.columns(2)
-    if bcol.button("Buy", type="primary", use_container_width=True, disabled=not can_trade, key=f"mkt_buy_{ticker}"):
+    if tc2.button("Buy", type="primary", use_container_width=True, disabled=not can_trade, key=f"mkt_buy_{ticker}"):
         try:
             store.execute_buy(user_key, ticker, qty, live_price)
             st.toast(f"Bought {qty:g} {ticker} at Rs. {live_price:,.2f}", icon="✅")
             st.rerun()
         except store.TradeError as e:
             st.error(str(e))
-    if scol.button("Sell", use_container_width=True, disabled=not can_trade, key=f"mkt_sell_{ticker}"):
+    if tc3.button("Sell", use_container_width=True, disabled=not can_trade, key=f"mkt_sell_{ticker}"):
         try:
             store.execute_sell(user_key, ticker, qty, live_price)
             st.toast(f"Sold {qty:g} {ticker} at Rs. {live_price:,.2f}", icon="✅")
             st.rerun()
         except store.TradeError as e:
             st.error(str(e))
+    with tc4:
+        if held:
+            unrealized = (live_price - held.avg_cost) * held.quantity if live_price else None
+            unrealized_note = f" | unrealized P&L Rs. {unrealized:,.2f}" if unrealized is not None else ""
+            st.caption(f"Position: {held.quantity:g} @ avg Rs. {held.avg_cost:,.2f}{unrealized_note}")
+        elif live_price and qty > 0:
+            st.caption(f"Order value: Rs. {qty * live_price:,.2f} (cash: Rs. {cash:,.2f})")
+        else:
+            st.caption("No existing position in this stock.")
+    return held
 
 
 def render_stock_detail(user_key: str, cash: float, ticker: str) -> None:
@@ -286,6 +405,9 @@ def render_stock_detail(user_key: str, cash: float, ticker: str) -> None:
     if not q:
         st.warning(f"Could not fetch a live quote for {ticker} right now.")
 
+    live_price = q["price"] if q else None
+    held = _render_order_toolbar(user_key, cash, ticker, live_price)
+
     st.write("")
     timeframe = st.selectbox("Timeframe", list(TIMEFRAME_PRESETS.keys()), index=4, key="mkt_timeframe")
     indicators = _render_indicator_controls()
@@ -295,11 +417,12 @@ def render_stock_detail(user_key: str, cash: float, ticker: str) -> None:
         st.info(f"No {timeframe} data available for {ticker} right now.")
         return
 
-    charts = _build_charts(hist, timeframe, indicators)
+    transactions = [txn for txn in store.get_transactions(user_key, limit=200) if txn.ticker == ticker]
+    charts = _build_charts(hist, timeframe, indicators, transactions=transactions, avg_cost=held.avg_cost if held else None)
     renderLightweightCharts(charts, key=f"mkt_chart_{ticker}_{timeframe}")
 
     interval, period = TIMEFRAME_PRESETS[timeframe]
-    st.caption(f"Showing {period} of {interval} bars - Yahoo Finance's own maximum lookback at this resolution.")
-
-    st.write("")
-    _render_order_panel(user_key, cash, ticker, q["price"] if q else None)
+    trade_note = " Past trades on this stock show as arrows on their candle" + (
+        ", and the dashed line is your average cost." if held else "."
+    )
+    st.caption(f"Showing {period} of {interval} bars - Yahoo Finance's own maximum lookback at this resolution.{trade_note}")
