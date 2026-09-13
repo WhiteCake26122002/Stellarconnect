@@ -64,6 +64,8 @@ soupsieve==2.9.2
 starlette==1.6.0
 streamlit==1.63.0
 streamlit-autorefresh==1.0.1
+streamlit-lightweight-charts==0.7.20
+ta==0.11.0
 toml==0.10.2
 tqdm==4.70.0
 typing-inspection==0.4.4

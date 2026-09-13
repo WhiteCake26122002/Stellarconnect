@@ -26,6 +26,7 @@ from streamlit_autorefresh import st_autorefresh
 
 import ui_common
 import ui_theme
+import ui_trading_markets
 from backend.common.company_search import search_companies
 from backend.common.finance import jensens_alpha
 from backend.trading import analysis, store
@@ -655,8 +656,8 @@ def _dashboard() -> None:
     live_prices_for_summary = get_live_prices(tuple(h.ticker for h in holdings_for_summary)) if holdings_for_summary else {}
     holdings_value = sum((live_prices_for_summary.get(h.ticker) or h.avg_cost) * h.quantity for h in holdings_for_summary)
 
-    tab_home, tab_orders, tab_portfolio, tab_benchmarks, tab_leaderboard = st.tabs(
-        ["Home", "Orders", "Portfolio", "Benchmarks", "Leaderboard"]
+    tab_home, tab_markets, tab_orders, tab_portfolio, tab_benchmarks, tab_leaderboard = st.tabs(
+        ["Home", "Markets", "Orders", "Portfolio", "Benchmarks", "Leaderboard"]
     )
 
     with tab_home:
@@ -670,6 +671,12 @@ def _dashboard() -> None:
         _popular_stocks_row()
         st.divider()
         _order_panel(user_key, user.cash)
+
+    with tab_markets:
+        if st.session_state.get("mkt_selected_ticker"):
+            ui_trading_markets.render_stock_detail(user_key, user.cash, st.session_state["mkt_selected_ticker"])
+        else:
+            ui_trading_markets.render_movers_tab(user_key, user.cash)
 
     with tab_orders:
         _transactions_table(user_key)

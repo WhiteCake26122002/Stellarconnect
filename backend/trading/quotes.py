@@ -162,3 +162,55 @@ def exchange_label(ticker: str) -> str:
     if ticker.startswith("^"):
         return "INDEX"
     return "US"
+
+
+# UI-facing timeframe label -> (yfinance interval, period) at Yahoo's own safe max lookback
+# for that interval. Finer intervals have real Yahoo-imposed lookback caps (1m: ~7d, 5m/15m:
+# ~60d, 1h: ~2y) - using anything longer just gets silently truncated by Yahoo, so these are
+# each interval's actual usable window, not an arbitrary choice.
+TIMEFRAME_PRESETS: dict[str, tuple[str, str]] = {
+    "1m": ("1m", "5d"),
+    "5m": ("5m", "60d"),
+    "15m": ("15m", "60d"),
+    "1h": ("1h", "2y"),
+    "1D": ("1d", "5y"),
+    "1W": ("1wk", "10y"),
+    "1M": ("1mo", "max"),
+}
+OHLC_TTL_INTRADAY_SECONDS = 30  # 1m/5m/15m/1h - close to live
+OHLC_TTL_DAILY_SECONDS = 3600  # 1D/1W/1M - changes at most once a session
+
+
+@st.cache_data(ttl=OHLC_TTL_INTRADAY_SECONDS, show_spinner=False)
+def _get_ohlc_history_intraday(ticker: str, interval: str, period: str) -> pd.DataFrame:
+    try:
+        hist = yf.Ticker(ticker).history(period=period, interval=interval)
+        return hist.reset_index() if not hist.empty else pd.DataFrame()
+    except Exception:
+        return pd.DataFrame()
+
+
+@st.cache_data(ttl=OHLC_TTL_DAILY_SECONDS, show_spinner=False)
+def _get_ohlc_history_daily(ticker: str, interval: str, period: str) -> pd.DataFrame:
+    try:
+        hist = yf.Ticker(ticker).history(period=period, interval=interval)
+        return hist.reset_index() if not hist.empty else pd.DataFrame()
+    except Exception:
+        return pd.DataFrame()
+
+
+def get_ohlc_history(ticker: str, timeframe: str) -> pd.DataFrame:
+    """
+    Full OHLCV history for `ticker` at one of the TIMEFRAME_PRESETS labels
+    ("1m","5m","15m","1h","1D","1W","1M"), each at Yahoo's own safe max lookback for that
+    interval. Empty DataFrame (never an exception) if the timeframe is unknown or the fetch
+    fails - callers should treat that as "no data available for this timeframe", not a crash.
+    Cached separately for intraday vs. daily+ intervals since they warrant very different TTLs.
+    """
+    preset = TIMEFRAME_PRESETS.get(timeframe)
+    if preset is None:
+        return pd.DataFrame()
+    interval, period = preset
+    if timeframe in ("1D", "1W", "1M"):
+        return _get_ohlc_history_daily(ticker, interval, period)
+    return _get_ohlc_history_intraday(ticker, interval, period)
