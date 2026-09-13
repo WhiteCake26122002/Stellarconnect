@@ -162,14 +162,26 @@ def render_custom_company_form() -> tuple[Company | None, HistoricalFinancials |
 
 
 def build_wacc_inputs_for_company(
-    hist, summary, company: Company, rf: float, beta_val: float, erp: float, kd: float,
-    kd_estimate: CostOfDebtEstimate | None = None, risk_free_rate_rationale: str | None = None,
+    hist,
+    summary,
+    company: Company,
+    rf: float,
+    beta_val: float,
+    erp: float,
+    kd: float,
+    kd_estimate: CostOfDebtEstimate | None = None,
+    risk_free_rate_rationale: str | None = None,
 ) -> WaccInputs:
     """
     Generic WACC-input builder that works for any company (sample or custom-entered),
     public or private. Spec section 13: public uses market value of equity where
     available; private falls back to a user-specified target capital structure since
     no market price exists.
+
+    `risk_free_rate_rationale` (optional): a human-readable note on where `rf` came
+    from (e.g. "Live: 10Y US Treasury yield") - passed straight through to
+    make_wacc_inputs so the sourcing is visible on the Assumptions tab, not just
+    the sidebar caption.
     """
     latest_bs = hist.balance_sheets[-1]
     target_equity_weight = st.session_state.get("custom_target_equity_weight")
