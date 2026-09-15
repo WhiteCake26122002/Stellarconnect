@@ -1,9 +1,20 @@
 """
 Markets tab for Paper Trading: gainers/losers across NSE indices, and a
-stock detail view with a TradingView-style candlestick chart (via
-streamlit-lightweight-charts, which wraps TradingView's own open-source
-Lightweight Charts library), toggleable technical indicators, and buy/sell
-straight from the chart.
+stock detail view with one unified TradingView-style chart - candles,
+toggleable technical indicators (overlays + oscillator sub-panes), and a
+click-to-draw toolset (trend lines, channels, Fibonacci retracement,
+anchored VWAP, a long/short position tool, ...) - plus buy/sell straight
+from the toolbar above it.
+
+The chart is hand-built on TradingView's own open-source Lightweight
+Charts library, loaded fresh via CDN inside a components.v1.html block,
+rather than through the streamlit-lightweight-charts Python wrapper this
+module used previously: that wrapper only exposes a declarative
+candles/lines/markers config, with no hook for the mouse-driven drawing
+interactions below. See _render_unified_chart's own docstring for the
+full rationale, including why TradingView's real "Advanced Chart" widget
+was tried and abandoned first (it blocks NSE/India symbols on its free
+public embed).
 
 Honesty notes carried through the UI, not hidden: movers refresh on a
 multi-minute cache for broad indices (a live per-ticker fetch across an
@@ -19,7 +30,6 @@ import json
 import pandas as pd
 import streamlit as st
 from streamlit_autorefresh import st_autorefresh
-from streamlit_lightweight_charts import renderLightweightCharts
 
 import ui_theme
 from backend.common.company_search import search_companies
@@ -196,25 +206,6 @@ def render_movers_tab(user_key: str, cash: float) -> None:
             _render_mover_row(row)
 
 
-def _chart_base_options(height: int) -> dict:
-    return {
-        "height": height,
-        "layout": {"background": {"type": "solid", "color": ui_theme.BLACK}, "textColor": ui_theme.MUTED},
-        "grid": {"vertLines": {"color": ui_theme.BORDER}, "horzLines": {"color": ui_theme.BORDER}},
-        "rightPriceScale": {"borderColor": ui_theme.BORDER},
-        "timeScale": {"borderColor": ui_theme.BORDER, "timeVisible": True},
-    }
-
-
-def _line_series(times: pd.Series, values: pd.Series, color: str, is_intraday: bool, width: int = 2) -> dict:
-    data = []
-    for t, v in zip(times, values):
-        if pd.isna(v):
-            continue
-        data.append({"time": int(t.timestamp()) if is_intraday else t.strftime("%Y-%m-%d"), "value": float(v)})
-    return {"type": "Line", "data": data, "options": {"color": color, "lineWidth": width}}
-
-
 def _render_indicator_controls() -> dict:
     """A compact settings panel (checkboxes + period inputs) for every supported indicator.
     Returns a plain dict of the current toggle/period state, read by the chart-building code
@@ -244,109 +235,6 @@ def _render_indicator_controls() -> dict:
         "bb": (show_bb, bb_period), "rsi": (show_rsi, rsi_period), "stoch": (show_stoch, stoch_period),
         "macd": (show_macd, None),
     }
-
-
-def _build_charts(
-    hist: pd.DataFrame, timeframe: str, indicators: dict,
-    transactions: list | None = None, avg_cost: float | None = None,
-) -> list[dict]:
-    time_col = "Date" if "Date" in hist.columns else "Datetime"
-    is_intraday = timeframe not in ("1D", "1W", "1M")
-    times = hist[time_col]
-
-    def t(ts):
-        return int(ts.timestamp()) if is_intraday else ts.strftime("%Y-%m-%d")
-
-    candles = [
-        {"time": t(row[time_col]), "open": row["Open"], "high": row["High"], "low": row["Low"], "close": row["Close"]}
-        for _, row in hist.iterrows()
-    ]
-
-    # Past trades on this ticker, rendered as arrows directly on the candle they filled at -
-    # the component has no separate "annotations" layer, but its series-level `markers` does
-    # exactly this (verified against the installed build before relying on it).
-    markers = []
-    for txn in (transactions or []):
-        is_buy = txn.side == "BUY"
-        markers.append({
-            "time": t(dt.datetime.fromisoformat(txn.timestamp)),
-            "position": "belowBar" if is_buy else "aboveBar",
-            "color": ui_theme.BULL if is_buy else ui_theme.BEAR,
-            "shape": "arrowUp" if is_buy else "arrowDown",
-            "text": f"{txn.side} {txn.quantity:g} @ {txn.price:,.2f}",
-        })
-
-    overlays = []
-    show_sma, sma_period = indicators["sma"]
-    if show_sma:
-        overlays.append(_line_series(times, ti.sma(hist["Close"], sma_period), ui_theme.NAVY_LIGHT, is_intraday))
-    show_ema, ema_period = indicators["ema"]
-    if show_ema:
-        overlays.append(_line_series(times, ti.ema(hist["Close"], ema_period), ui_theme.CYAN, is_intraday))
-    show_dma, dma_period = indicators["dma"]
-    if show_dma:
-        overlays.append(_line_series(times, ti.dma(hist["Close"], dma_period), ui_theme.WARN, is_intraday))
-    show_bb, bb_period = indicators["bb"]
-    if show_bb:
-        upper, mid, lower = ti.bollinger_bands(hist["Close"], bb_period)
-        overlays.append(_line_series(times, upper, ui_theme.MUTED, is_intraday, width=1))
-        overlays.append(_line_series(times, mid, ui_theme.MUTED_2, is_intraday, width=1))
-        overlays.append(_line_series(times, lower, ui_theme.MUTED, is_intraday, width=1))
-
-    if avg_cost is not None and len(times) > 0:
-        # No native horizontal price-line API in this build (checked before relying on it) -
-        # a flat two-point Line series across the visible range reads the same way visually.
-        overlays.append({
-            "type": "Line",
-            "data": [{"time": t(times.iloc[0]), "value": avg_cost}, {"time": t(times.iloc[-1]), "value": avg_cost}],
-            "options": {"color": ui_theme.MUTED_2, "lineWidth": 1, "lineStyle": 2},
-        })
-
-    candlestick_series = {
-        "type": "Candlestick",
-        "data": candles,
-        "options": {
-            "upColor": ui_theme.BULL, "downColor": ui_theme.BEAR, "borderVisible": False,
-            "wickUpColor": ui_theme.BULL, "wickDownColor": ui_theme.BEAR,
-        },
-    }
-    if markers:
-        candlestick_series["markers"] = markers
-
-    main_chart = {
-        "chart": {**_chart_base_options(420), "crosshair": {"mode": 0}},
-        "series": [candlestick_series, *overlays],
-    }
-    charts = [main_chart]
-
-    show_rsi, rsi_period = indicators["rsi"]
-    if show_rsi:
-        rsi_vals = ti.rsi(hist["Close"], rsi_period)
-        charts.append({"chart": _chart_base_options(140), "series": [_line_series(times, rsi_vals, ui_theme.WARN, is_intraday)]})
-
-    show_stoch, stoch_period = indicators["stoch"]
-    if show_stoch:
-        k, d = ti.stoch_rsi(hist["Close"], stoch_period)
-        charts.append({
-            "chart": _chart_base_options(140),
-            "series": [
-                _line_series(times, k, ui_theme.NAVY_LIGHT, is_intraday),
-                _line_series(times, d, ui_theme.CYAN, is_intraday),
-            ],
-        })
-
-    show_macd, _ = indicators["macd"]
-    if show_macd:
-        macd_line, signal_line, _hist_bars = ti.macd(hist["Close"])
-        charts.append({
-            "chart": _chart_base_options(140),
-            "series": [
-                _line_series(times, macd_line, ui_theme.NAVY_LIGHT, is_intraday),
-                _line_series(times, signal_line, ui_theme.WARN, is_intraday),
-            ],
-        })
-
-    return charts
 
 
 def _render_order_toolbar(user_key: str, cash: float, ticker: str, live_price: float | None):
@@ -444,34 +332,45 @@ def _render_financials_panel(ticker: str) -> None:
         st.markdown(f"[Visit website ↗]({stats['website']})")
 
 
-def _render_drawing_chart(ticker: str, timeframe: str, hist: pd.DataFrame, transactions: list, avg_cost: float | None) -> None:
+FIB_LEVELS = [0, 0.236, 0.382, 0.5, 0.618, 0.786, 1, 1.272, 1.618]
+
+
+def _render_unified_chart(
+    ticker: str, timeframe: str, hist: pd.DataFrame, indicators: dict,
+    transactions: list, avg_cost: float | None,
+) -> None:
     """
-    A second, hand-built chart with TradingView-style drawing tools (trend line, horizontal
-    ray, text note) that the tradeable chart above can't offer: it renders through
-    streamlit_lightweight_charts, a pre-built component we only get to configure declaratively
-    (candles/lines/markers), not extend with custom mouse-driven interactions.
+    One chart - candles, every existing indicator (SMA/EMA/DMA/BB overlays; RSI/Stochastic
+    RSI/MACD each in their own synced sub-pane below), trade markers, the avg-cost line, and a
+    click-to-draw toolset - replacing the split "tradeable chart" + "separate drawing chart"
+    this module shipped with initially.
 
-    Embedding TradingView's own real "Advanced Chart" widget was tried first and abandoned:
-    confirmed directly against TradingView's own embed endpoint that NSE (India) symbols are
-    blocked on the free public widget ("This symbol is only available on TradingView") while a
-    US ticker like AAPL loads fine - since this app's own default watchlist and branding is
-    India-first (NIFTY/SENSEX, RELIANCE.NS/TCS.NS/INFY.NS), that would have made drawing tools
-    work for a minority of this app's stocks. This chart instead loads TradingView's own
-    *open-source* Lightweight Charts library fresh via CDN (not through the Python wrapper
-    above) so this app's own code can drive it directly and wire up real click-to-draw tools,
-    working identically for every ticker since it's built on this app's own Yahoo Finance data.
+    Hand-built on TradingView's own open-source Lightweight Charts library, loaded fresh via
+    CDN inside a components.v1.html block, rather than through the streamlit-lightweight-charts
+    Python wrapper this module used previously: that wrapper only takes a declarative
+    candles/lines/markers config, with no hook for the mouse-driven drawing tools below.
+    (Embedding TradingView's own real "Advanced Chart" widget was tried first and abandoned:
+    confirmed directly against TradingView's own embed endpoint that it blocks NSE/India
+    symbols on the free public embed - "This symbol is only available on TradingView" - while a
+    US ticker loads fine; since this app's own default watchlist is India-first, that would
+    have made drawing tools work for a minority of this app's stocks.)
 
-    Streamlit tears this whole component's iframe down and rebuilds it fresh on every script
-    rerun (this page's own 25s autorefresh included, same as the tradeable chart above already
-    does), and st.components.v1.html has no channel back to Python - so a plain in-memory
-    drawings list would visibly vanish within seconds of drawing it, which is exactly what
-    shipped first and is not what "a drawing tool" should do. Fixed by persisting drawings in
-    localStorage (keyed per ticker+timeframe) instead of a JS variable: this iframe is loaded
-    via srcdoc with sandbox="allow-same-origin", which per spec makes its effective origin the
-    parent page's own origin, not an opaque one - confirmed in-browser (drawn, then forced a
-    rerun via an unrelated click, and it was still there) rather than assumed from the spec
-    alone. Every new drawing is saved immediately and the full set is replayed on load, so
-    drawings now survive reruns the same way the rest of this app's own state does.
+    The drawing toolset is a deliberately-scoped subset of TradingView's own ~190-tool catalog,
+    not an attempt at parity with it - that catalog (Elliott Wave, Gann, harmonic patterns,
+    pitchforks, auto pattern recognition, volume profile, ...) is itself a multi-year
+    proprietary charting product, not something to hand-build here. This covers most of what a
+    working trader actually reaches for day to day: trend line, ray, extended line, horizontal
+    line/ray, parallel channel, rectangle (zones), Fibonacci retracement, anchored VWAP, and a
+    long/short position tool with entry/stop/target and its R:R ratio - plus text notes.
+
+    Every drawing is saved to localStorage (keyed per ticker+timeframe) the moment it's made,
+    and the saved set is replayed when the chart (re)loads - this component's iframe is torn
+    down and rebuilt fresh on every Streamlit rerun (this page's own 25s autorefresh included),
+    which otherwise silently erased anything drawn within seconds, reported directly by the
+    user right after that first version shipped. Persistence relies on this iframe being loaded
+    via srcdoc with sandbox="allow-same-origin", which per spec gives it the parent page's own
+    storage origin rather than an opaque one - confirmed in-browser (drawn, forced a rerun via
+    an unrelated click, still there), not just assumed from the spec.
     """
     time_col = "Date" if "Date" in hist.columns else "Datetime"
     is_intraday = timeframe not in ("1D", "1W", "1M")
@@ -487,6 +386,8 @@ def _render_drawing_chart(ticker: str, timeframe: str, hist: pd.DataFrame, trans
         }
         for _, row in hist.iterrows()
     ]
+    volumes = [float(v) if pd.notna(v) else 0.0 for v in hist["Volume"]] if "Volume" in hist.columns else [0.0] * len(hist)
+
     trade_markers = []
     for txn in (transactions or []):
         is_buy = txn.side == "BUY"
@@ -497,36 +398,103 @@ def _render_drawing_chart(ticker: str, timeframe: str, hist: pd.DataFrame, trans
             "shape": "arrowUp" if is_buy else "arrowDown",
             "text": f"{txn.side} {txn.quantity:g} @ {txn.price:,.2f}",
         })
+
+    def series_data(values: pd.Series) -> list[dict]:
+        out = []
+        for ts, v in zip(times, values):
+            if pd.isna(v):
+                continue
+            out.append({"time": t(ts), "value": float(v)})
+        return out
+
+    overlays = []
+    show_sma, sma_period = indicators["sma"]
+    if show_sma:
+        overlays.append((series_data(ti.sma(hist["Close"], sma_period)), ui_theme.NAVY_LIGHT, 2))
+    show_ema, ema_period = indicators["ema"]
+    if show_ema:
+        overlays.append((series_data(ti.ema(hist["Close"], ema_period)), ui_theme.CYAN, 2))
+    show_dma, dma_period = indicators["dma"]
+    if show_dma:
+        overlays.append((series_data(ti.dma(hist["Close"], dma_period)), ui_theme.WARN, 2))
+    show_bb, bb_period = indicators["bb"]
+    if show_bb:
+        upper, mid, lower = ti.bollinger_bands(hist["Close"], bb_period)
+        overlays.append((series_data(upper), ui_theme.MUTED, 1))
+        overlays.append((series_data(mid), ui_theme.MUTED_2, 1))
+        overlays.append((series_data(lower), ui_theme.MUTED, 1))
+
+    oscillators = []
+    show_rsi, rsi_period = indicators["rsi"]
+    if show_rsi:
+        oscillators.append(("RSI", [(series_data(ti.rsi(hist["Close"], rsi_period)), ui_theme.WARN, 2)]))
+    show_stoch, stoch_period = indicators["stoch"]
+    if show_stoch:
+        k, d = ti.stoch_rsi(hist["Close"], stoch_period)
+        oscillators.append(("Stochastic RSI", [(series_data(k), ui_theme.NAVY_LIGHT, 2), (series_data(d), ui_theme.CYAN, 2)]))
+    show_macd, _ = indicators["macd"]
+    if show_macd:
+        macd_line, signal_line, _hist_bars = ti.macd(hist["Close"])
+        oscillators.append(("MACD", [(series_data(macd_line), ui_theme.NAVY_LIGHT, 2), (series_data(signal_line), ui_theme.WARN, 2)]))
+
     candles_json = json.dumps(candles)
+    volumes_json = json.dumps(volumes)
     trade_markers_json = json.dumps(trade_markers)
     avg_cost_json = json.dumps(float(avg_cost)) if avg_cost is not None else "null"
-    container_id = f"draw_{ticker.replace('.', '_').replace('^', '')}_{timeframe}"
+    overlays_json = json.dumps([{"data": data, "color": color, "width": width} for data, color, width in overlays])
+    oscillators_json = json.dumps([
+        {"title": title, "series": [{"data": data, "color": color, "width": width} for data, color, width in series_list]}
+        for title, series_list in oscillators
+    ])
+    fib_levels_json = json.dumps(FIB_LEVELS)
+    container_id = f"chart_{ticker.replace('.', '_').replace('^', '')}_{timeframe}"
+    total_height = 90 + 460 + len(oscillators) * 172 + 40
 
     widget_html = f"""
     <style>
       body {{ margin: 0; font-family: 'IBM Plex Sans', -apple-system, sans-serif; }}
-      .dtool-bar {{ display: flex; gap: 6px; padding: 6px 0 10px; flex-wrap: wrap; }}
-      .dtool-btn {{ background: {ui_theme.PANEL_RAISED}; color: {ui_theme.MUTED}; border: 1px solid {ui_theme.BORDER};
-        border-radius: 6px; padding: 6px 12px; font-size: 0.78rem; cursor: pointer; }}
-      .dtool-btn.active {{ background: {ui_theme.NAVY_LIGHT}22; color: {ui_theme.NAVY_LIGHT}; border-color: {ui_theme.NAVY_LIGHT}; }}
+      .dtool-bar {{ display: flex; gap: 6px; padding: 6px 0 10px; flex-wrap: wrap; align-items: center; }}
+      .dtool-select, .dtool-btn {{ background: {ui_theme.PANEL_RAISED}; color: {ui_theme.MUTED}; border: 1px solid {ui_theme.BORDER};
+        border-radius: 6px; padding: 6px 10px; font-size: 0.78rem; cursor: pointer; font-family: inherit; }}
       .dtool-btn:hover {{ color: {ui_theme.INK}; }}
-      .dtool-hint {{ color: {ui_theme.MUTED_2}; font-size: 0.72rem; padding-left: 4px; align-self: center; }}
+      .dtool-hint {{ color: {ui_theme.MUTED_2}; font-size: 0.72rem; padding-left: 4px; }}
+      .osc-label {{ font-size: 0.72rem; color: {ui_theme.MUTED_2}; margin: 8px 0 2px; }}
     </style>
     <div class="dtool-bar">
-      <button class="dtool-btn active" id="tool-cursor">Cursor</button>
-      <button class="dtool-btn" id="tool-trendline">Trend Line</button>
-      <button class="dtool-btn" id="tool-hline">Horizontal Line</button>
-      <button class="dtool-btn" id="tool-text">Text</button>
+      <select class="dtool-select" id="tool-select">
+        <option value="cursor">Cursor</option>
+        <option value="trendline">Trend Line</option>
+        <option value="ray">Ray</option>
+        <option value="extline">Extended Line</option>
+        <option value="hline">Horizontal Line</option>
+        <option value="hray">Horizontal Ray</option>
+        <option value="channel">Parallel Channel</option>
+        <option value="rect">Rectangle</option>
+        <option value="fib">Fibonacci Retracement</option>
+        <option value="vwap">Anchored VWAP</option>
+        <option value="longpos">Long Position</option>
+        <option value="shortpos">Short Position</option>
+        <option value="text">Text</option>
+      </select>
+      <button class="dtool-btn" id="tool-undo">Undo</button>
       <button class="dtool-btn" id="tool-clear">Clear All</button>
       <span class="dtool-hint" id="dtool-hint"></span>
     </div>
     <div id="{container_id}" style="height:460px;width:100%"></div>
+    <div id="{container_id}_osc"></div>
     <script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
     <script>
       const CANDLES = {candles_json};
+      const VOLUMES = {volumes_json};
       const TRADE_MARKERS = {trade_markers_json};
       const AVG_COST = {avg_cost_json};
+      const OVERLAYS = {overlays_json};
+      const OSCILLATORS = {oscillators_json};
+      const FIB_LEVELS = {fib_levels_json};
       const STORAGE_KEY = "pt_drawings::{container_id}";
+      const FIRST_TIME = CANDLES.length ? CANDLES[0].time : null;
+      const LAST_TIME = CANDLES.length ? CANDLES[CANDLES.length - 1].time : null;
+
       const container = document.getElementById("{container_id}");
       const chart = LightweightCharts.createChart(container, {{
         width: container.clientWidth, height: 460,
@@ -546,108 +514,275 @@ def _render_drawing_chart(ticker: str, timeframe: str, hist: pd.DataFrame, trans
       if (TRADE_MARKERS.length) refreshMarkers();
       if (AVG_COST !== null && CANDLES.length > 0) {{
         const avgSeries = chart.addLineSeries({{ color: "{ui_theme.MUTED_2}", lineWidth: 1, lineStyle: 2 }});
-        avgSeries.setData([{{time: CANDLES[0].time, value: AVG_COST}}, {{time: CANDLES[CANDLES.length - 1].time, value: AVG_COST}}]);
+        avgSeries.setData([{{ time: FIRST_TIME, value: AVG_COST }}, {{ time: LAST_TIME, value: AVG_COST }}]);
       }}
+      OVERLAYS.forEach(o => {{
+        const s = chart.addLineSeries({{ color: o.color, lineWidth: o.width }});
+        s.setData(o.data);
+      }});
       new ResizeObserver(entries => {{
         chart.applyOptions({{ width: entries[0].contentRect.width }});
       }}).observe(container);
 
-      // Persisted drawings: this component's own iframe is torn down and rebuilt fresh on
-      // every Streamlit rerun (the 25s autorefresh included), so a plain in-memory list would
-      // vanish within seconds. localStorage survives that - this iframe is loaded via srcdoc
-      // with allow-same-origin, so it shares the parent page's origin/storage rather than
-      // getting an opaque one.
+      // Oscillator sub-panes (RSI/Stochastic RSI/MACD) - separate mini charts stacked below,
+      // time-scale-synced to the main pane both ways, the same way any multi-pane charting UI
+      // keeps its panes moving together.
+      const oscHost = document.getElementById("{container_id}_osc");
+      const subCharts = [];
+      OSCILLATORS.forEach(osc => {{
+        const label = document.createElement("div");
+        label.className = "osc-label";
+        label.textContent = osc.title;
+        oscHost.appendChild(label);
+        const paneDiv = document.createElement("div");
+        paneDiv.style.height = "150px";
+        paneDiv.style.width = "100%";
+        oscHost.appendChild(paneDiv);
+        const sc = LightweightCharts.createChart(paneDiv, {{
+          width: paneDiv.clientWidth, height: 150,
+          layout: {{ background: {{ color: "{ui_theme.BLACK}" }}, textColor: "{ui_theme.MUTED}" }},
+          grid: {{ vertLines: {{ color: "{ui_theme.BORDER}" }}, horzLines: {{ color: "{ui_theme.BORDER}" }} }},
+          rightPriceScale: {{ borderColor: "{ui_theme.BORDER}" }},
+          timeScale: {{ borderColor: "{ui_theme.BORDER}", timeVisible: true }},
+        }});
+        osc.series.forEach(spec => {{
+          const s = sc.addLineSeries({{ color: spec.color, lineWidth: spec.width }});
+          s.setData(spec.data);
+        }});
+        subCharts.push(sc);
+        new ResizeObserver(entries => sc.applyOptions({{ width: entries[0].contentRect.width }})).observe(paneDiv);
+      }});
+      let syncingPanes = false;
+      function syncFrom(source) {{
+        if (syncingPanes) return;
+        syncingPanes = true;
+        const range = source.timeScale().getVisibleLogicalRange();
+        if (range) {{
+          [chart, ...subCharts].forEach(c => {{ if (c !== source) c.timeScale().setVisibleLogicalRange(range); }});
+        }}
+        syncingPanes = false;
+      }}
+      chart.timeScale().subscribeVisibleLogicalRangeChange(() => syncFrom(chart));
+      subCharts.forEach(sc => sc.timeScale().subscribeVisibleLogicalRangeChange(() => syncFrom(sc)));
+
+      // --- Drawing tools -----------------------------------------------------------------
+      function timeToIndex(time) {{
+        for (let i = 0; i < CANDLES.length; i++) {{ if (CANDLES[i].time === time) return i; }}
+        return -1;
+      }}
+      function timeIsBefore(a, b) {{ return timeToIndex(a) <= timeToIndex(b); }}
+      function priceAt(p1, p2, targetTime) {{
+        const i1 = timeToIndex(p1.time), i2 = timeToIndex(p2.time), it = timeToIndex(targetTime);
+        if (i1 < 0 || i2 < 0 || it < 0 || i1 === i2) return p2.price;
+        const slope = (p2.price - p1.price) / (i2 - i1);
+        return p1.price + slope * (it - i1);
+      }}
+
       let saved = [];
       try {{ saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]"); }} catch (e) {{ saved = []; }}
       let drawnSeries = [];
+      let drawnPriceLines = [];
 
       function persist() {{
         try {{ localStorage.setItem(STORAGE_KEY, JSON.stringify(saved)); }} catch (e) {{ /* storage unavailable - drawing still works this session */ }}
       }}
 
-      function paintTrendLine(p1, p2) {{
-        const line = chart.addLineSeries({{ color: "{ui_theme.NAVY_LIGHT}", lineWidth: 2 }});
-        line.setData([{{ time: p1.time, value: p1.price }}, {{ time: p2.time, value: p2.price }}]);
-        drawnSeries.push(line);
-      }}
-      function paintHLine(price) {{
-        const line = chart.addLineSeries({{ color: "{ui_theme.CYAN}", lineWidth: 1, lineStyle: 2 }});
-        line.setData([{{ time: CANDLES[0].time, value: price }}, {{ time: CANDLES[CANDLES.length - 1].time, value: price }}]);
-        drawnSeries.push(line);
-      }}
-      function paintText(time, text) {{
-        textMarkers.push({{ time, position: "aboveBar", color: "{ui_theme.WARN}", shape: "circle", text }});
-        refreshMarkers();
-      }}
-      for (const d of saved) {{
-        if (d.type === "trendline") paintTrendLine(d.p1, d.p2);
-        else if (d.type === "hline") paintHLine(d.price);
-        else if (d.type === "text") paintText(d.time, d.text);
+      function paintDrawing(d) {{
+        if (d.type === "trendline") {{
+          const s = chart.addLineSeries({{ color: "{ui_theme.NAVY_LIGHT}", lineWidth: 2 }});
+          s.setData([{{ time: d.p1.time, value: d.p1.price }}, {{ time: d.p2.time, value: d.p2.price }}]);
+          drawnSeries.push(s);
+        }} else if (d.type === "ray") {{
+          const extPrice = priceAt(d.p1, d.p2, LAST_TIME);
+          const s = chart.addLineSeries({{ color: "{ui_theme.NAVY_LIGHT}", lineWidth: 2 }});
+          s.setData([{{ time: d.p1.time, value: d.p1.price }}, {{ time: LAST_TIME, value: extPrice }}]);
+          drawnSeries.push(s);
+        }} else if (d.type === "extline") {{
+          const rightPrice = priceAt(d.p1, d.p2, LAST_TIME);
+          const leftPrice = priceAt(d.p2, d.p1, FIRST_TIME);
+          const s = chart.addLineSeries({{ color: "{ui_theme.NAVY_LIGHT}", lineWidth: 1, lineStyle: 1 }});
+          s.setData([{{ time: FIRST_TIME, value: leftPrice }}, {{ time: LAST_TIME, value: rightPrice }}]);
+          drawnSeries.push(s);
+        }} else if (d.type === "hline") {{
+          const pl = candleSeries.createPriceLine({{
+            price: d.price, color: "{ui_theme.CYAN}", lineWidth: 1, lineStyle: 2,
+            axisLabelVisible: true, title: "Level",
+          }});
+          drawnPriceLines.push(pl);
+        }} else if (d.type === "hray") {{
+          const s = chart.addLineSeries({{ color: "{ui_theme.CYAN}", lineWidth: 1, lineStyle: 2 }});
+          s.setData([{{ time: d.time, value: d.price }}, {{ time: LAST_TIME, value: d.price }}]);
+          drawnSeries.push(s);
+        }} else if (d.type === "channel") {{
+          const s1 = chart.addLineSeries({{ color: "{ui_theme.NAVY_LIGHT}", lineWidth: 2 }});
+          s1.setData([{{ time: d.p1.time, value: d.p1.price }}, {{ time: d.p2.time, value: d.p2.price }}]);
+          drawnSeries.push(s1);
+          const s2 = chart.addLineSeries({{ color: "{ui_theme.NAVY_LIGHT}", lineWidth: 1, lineStyle: 2 }});
+          s2.setData([{{ time: d.p1.time, value: d.p1.price + d.offset }}, {{ time: d.p2.time, value: d.p2.price + d.offset }}]);
+          drawnSeries.push(s2);
+        }} else if (d.type === "rect") {{
+          const top = Math.max(d.p1.price, d.p2.price);
+          const bottom = Math.min(d.p1.price, d.p2.price);
+          const first = timeIsBefore(d.p1.time, d.p2.time) ? d.p1.time : d.p2.time;
+          const last = timeIsBefore(d.p1.time, d.p2.time) ? d.p2.time : d.p1.time;
+          const area = chart.addAreaSeries({{
+            topColor: "rgba(166,132,255,0.28)", bottomColor: "rgba(166,132,255,0.06)",
+            lineColor: "{ui_theme.NAVY_LIGHT}", lineWidth: 1, baseValue: {{ type: "price", price: bottom }},
+          }});
+          area.setData([{{ time: first, value: top }}, {{ time: last, value: top }}]);
+          drawnSeries.push(area);
+        }} else if (d.type === "fib") {{
+          FIB_LEVELS.forEach(pct => {{
+            const price = d.p1.price + (d.p2.price - d.p1.price) * pct;
+            const pl = candleSeries.createPriceLine({{
+              price, color: "{ui_theme.WARN}", lineWidth: 1, lineStyle: 2,
+              axisLabelVisible: true, title: (pct * 100).toFixed(1) + "%",
+            }});
+            drawnPriceLines.push(pl);
+          }});
+        }} else if (d.type === "vwap") {{
+          const idx = timeToIndex(d.anchorTime);
+          if (idx < 0) return;
+          let cumPV = 0, cumV = 0;
+          const data = [];
+          for (let i = idx; i < CANDLES.length; i++) {{
+            const c = CANDLES[i];
+            const typical = (c.high + c.low + c.close) / 3;
+            const vol = VOLUMES[i] || 0;
+            cumPV += typical * vol; cumV += vol;
+            data.push({{ time: c.time, value: cumV > 0 ? cumPV / cumV : typical }});
+          }}
+          const s = chart.addLineSeries({{ color: "{ui_theme.WARN}", lineWidth: 2 }});
+          s.setData(data);
+          drawnSeries.push(s);
+        }} else if (d.type === "position") {{
+          const idx = timeToIndex(d.entryTime);
+          if (idx < 0) return;
+          const endTime = CANDLES[Math.min(idx + 20, CANDLES.length - 1)].time;
+          const riskArea = chart.addAreaSeries({{
+            topColor: "rgba(255,138,118,0.32)", bottomColor: "rgba(0,0,0,0)",
+            lineColor: "rgba(0,0,0,0)", lineWidth: 1, baseValue: {{ type: "price", price: d.entry }},
+          }});
+          riskArea.setData([{{ time: d.entryTime, value: d.stop }}, {{ time: endTime, value: d.stop }}]);
+          drawnSeries.push(riskArea);
+          const rewardArea = chart.addAreaSeries({{
+            topColor: "rgba(95,224,168,0.32)", bottomColor: "rgba(0,0,0,0)",
+            lineColor: "rgba(0,0,0,0)", lineWidth: 1, baseValue: {{ type: "price", price: d.entry }},
+          }});
+          rewardArea.setData([{{ time: d.entryTime, value: d.target }}, {{ time: endTime, value: d.target }}]);
+          drawnSeries.push(rewardArea);
+          const rr = Math.abs(d.target - d.entry) / (Math.abs(d.entry - d.stop) || 1);
+          const pl = candleSeries.createPriceLine({{
+            price: d.entry, color: "{ui_theme.INK}", lineWidth: 1, lineStyle: 0, axisLabelVisible: true,
+            title: (d.side === "long" ? "Long" : "Short") + " entry (R:R " + rr.toFixed(2) + ")",
+          }});
+          drawnPriceLines.push(pl);
+        }} else if (d.type === "text") {{
+          textMarkers.push({{ time: d.time, position: "aboveBar", color: "{ui_theme.WARN}", shape: "circle", text: d.text }});
+          refreshMarkers();
+        }}
       }}
 
-      let activeTool = "cursor";
-      let pendingPoint = null;
-      const hints = {{
-        cursor: "", trendline: "Click a start point, then an end point.",
-        hline: "Click a price to draw a horizontal level.", text: "Click a point to add a text note.",
-      }};
-      function setActiveTool(tool) {{
-        activeTool = tool;
-        pendingPoint = null;
-        document.querySelectorAll(".dtool-btn").forEach(b => b.classList.remove("active"));
-        const btn = document.getElementById("tool-" + tool);
-        if (btn) btn.classList.add("active");
-        document.getElementById("dtool-hint").textContent = hints[tool] || "";
-      }}
-      document.getElementById("tool-cursor").addEventListener("click", () => setActiveTool("cursor"));
-      document.getElementById("tool-trendline").addEventListener("click", () => setActiveTool("trendline"));
-      document.getElementById("tool-hline").addEventListener("click", () => setActiveTool("hline"));
-      document.getElementById("tool-text").addEventListener("click", () => setActiveTool("text"));
-      document.getElementById("tool-clear").addEventListener("click", () => {{
+      function redrawAll() {{
         drawnSeries.forEach(s => chart.removeSeries(s));
         drawnSeries = [];
+        drawnPriceLines.forEach(pl => candleSeries.removePriceLine(pl));
+        drawnPriceLines = [];
         textMarkers = [];
-        saved = [];
-        persist();
+        for (const d of saved) paintDrawing(d);
         refreshMarkers();
-        pendingPoint = null;
+      }}
+      for (const d of saved) paintDrawing(d);
+
+      const CLICKS_NEEDED = {{
+        cursor: 0, trendline: 2, ray: 2, extline: 2, hline: 1, hray: 1,
+        channel: 3, rect: 2, fib: 2, vwap: 1, longpos: 1, shortpos: 1, text: 1,
+      }};
+      const HINTS = {{
+        cursor: "", trendline: "Click a start point, then an end point.",
+        ray: "Click a start point, then a second - the line extends past it.",
+        extline: "Click two points - the line extends beyond both.",
+        hline: "Click a price for a level across the whole chart.",
+        hray: "Click a point - the level extends only to the right.",
+        channel: "Click two points for the trend line, then a third for the channel width.",
+        rect: "Click one corner, then the opposite corner.",
+        fib: "Click the swing high, then the swing low (or reverse).",
+        vwap: "Click a bar to anchor VWAP from that point forward.",
+        longpos: "Click your entry point, then enter stop-loss and target.",
+        shortpos: "Click your entry point, then enter stop-loss and target.",
+        text: "Click a point to add a text note.",
+      }};
+      let activeTool = "cursor";
+      let clickBuffer = [];
+      document.getElementById("dtool-hint").textContent = HINTS.cursor;
+      document.getElementById("tool-select").addEventListener("change", e => {{
+        activeTool = e.target.value;
+        clickBuffer = [];
+        document.getElementById("dtool-hint").textContent = HINTS[activeTool] || "";
       }});
+      document.getElementById("tool-undo").addEventListener("click", () => {{
+        if (!saved.length) return;
+        saved.pop();
+        redrawAll();
+        persist();
+      }});
+      document.getElementById("tool-clear").addEventListener("click", () => {{
+        saved = [];
+        redrawAll();
+        persist();
+      }});
+
+      function finalizeDrawing() {{
+        const pts = clickBuffer;
+        let d = null;
+        if (activeTool === "trendline") d = {{ type: "trendline", p1: pts[0], p2: pts[1] }};
+        else if (activeTool === "ray") d = {{ type: "ray", p1: pts[0], p2: pts[1] }};
+        else if (activeTool === "extline") d = {{ type: "extline", p1: pts[0], p2: pts[1] }};
+        else if (activeTool === "hline") d = {{ type: "hline", price: pts[0].price }};
+        else if (activeTool === "hray") d = {{ type: "hray", time: pts[0].time, price: pts[0].price }};
+        else if (activeTool === "channel") {{
+          const onLine = priceAt(pts[0], pts[1], pts[2].time);
+          d = {{ type: "channel", p1: pts[0], p2: pts[1], offset: pts[2].price - onLine }};
+        }} else if (activeTool === "rect") d = {{ type: "rect", p1: pts[0], p2: pts[1] }};
+        else if (activeTool === "fib") d = {{ type: "fib", p1: pts[0], p2: pts[1] }};
+        else if (activeTool === "vwap") d = {{ type: "vwap", anchorTime: pts[0].time }};
+        else if (activeTool === "longpos" || activeTool === "shortpos") {{
+          const stop = parseFloat(prompt("Stop-loss price:"));
+          const target = parseFloat(prompt("Take-profit price:"));
+          if (!isFinite(stop) || !isFinite(target)) {{ clickBuffer = []; return; }}
+          d = {{
+            type: "position", side: activeTool === "longpos" ? "long" : "short",
+            entryTime: pts[0].time, entry: pts[0].price, stop, target,
+          }};
+        }} else if (activeTool === "text") {{
+          const label = prompt("Annotation text:");
+          if (!label) {{ clickBuffer = []; return; }}
+          d = {{ type: "text", time: pts[0].time, text: label }};
+        }}
+        if (d) {{
+          paintDrawing(d);
+          saved.push(d);
+          persist();
+        }}
+        clickBuffer = [];
+      }}
 
       chart.subscribeClick(param => {{
         if (activeTool === "cursor" || !param.point || !param.time) return;
         const price = candleSeries.coordinateToPrice(param.point.y);
         if (price === null) return;
-        const time = param.time;
-
-        if (activeTool === "trendline") {{
-          if (!pendingPoint) {{
-            pendingPoint = {{ time, price }};
-          }} else {{
-            paintTrendLine(pendingPoint, {{ time, price }});
-            saved.push({{ type: "trendline", p1: pendingPoint, p2: {{ time, price }} }});
-            persist();
-            pendingPoint = null;
-          }}
-        }} else if (activeTool === "hline") {{
-          paintHLine(price);
-          saved.push({{ type: "hline", price }});
-          persist();
-        }} else if (activeTool === "text") {{
-          const label = prompt("Annotation text:");
-          if (label) {{
-            paintText(time, label);
-            saved.push({{ type: "text", time, text: label }});
-            persist();
-          }}
-        }}
+        clickBuffer.push({{ time: param.time, price }});
+        if (clickBuffer.length >= CLICKS_NEEDED[activeTool]) finalizeDrawing();
       }});
     </script>
     """
-    st.components.v1.html(widget_html, height=510, scrolling=False)
+    st.components.v1.html(widget_html, height=total_height, scrolling=False)
     st.caption(
-        "Drawn on this app's own live data, so it works the same for every stock. Drawings are saved "
-        "per stock and timeframe in this browser, and stay put across refreshes and tab switches - "
-        "clearing the browser's site data (or a different browser/device) starts fresh."
+        "Trend line, ray, extended line, horizontal line/ray, parallel channel, rectangle, "
+        "Fibonacci retracement, anchored VWAP, and a long/short position tool - a working "
+        "subset of TradingView's own drawing catalog, not full parity with it. Drawings are "
+        "saved per stock and timeframe in this browser and stay put across refreshes and tab "
+        "switches; clearing the browser's site data (or a different browser/device) starts fresh."
     )
 
 
@@ -688,17 +823,13 @@ def render_stock_detail(user_key: str, cash: float, ticker: str) -> None:
         return
 
     transactions = [txn for txn in store.get_transactions(user_key, limit=200) if txn.ticker == ticker]
-    charts = _build_charts(hist, timeframe, indicators, transactions=transactions, avg_cost=held.avg_cost if held else None)
-    renderLightweightCharts(charts, key=f"mkt_chart_{ticker}_{timeframe}")
+    _render_unified_chart(ticker, timeframe, hist, indicators, transactions, held.avg_cost if held else None)
 
     interval, period = TIMEFRAME_PRESETS[timeframe]
     trade_note = " Past trades on this stock show as arrows on their candle" + (
         ", and the dashed line is your average cost." if held else "."
     )
     st.caption(f"Showing {period} of {interval} bars - Yahoo Finance's own maximum lookback at this resolution.{trade_note}")
-
-    with st.expander("🖊️ Draw on Chart — trend lines, horizontal levels, text notes", key=f"mkt_draw_expander_{ticker}"):
-        _render_drawing_chart(ticker, timeframe, hist, transactions, held.avg_cost if held else None)
 
     st.divider()
     _render_financials_panel(ticker)
