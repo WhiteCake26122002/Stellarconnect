@@ -448,7 +448,7 @@ def _render_unified_chart(
     ])
     fib_levels_json = json.dumps(FIB_LEVELS)
     container_id = f"chart_{ticker.replace('.', '_').replace('^', '')}_{timeframe}"
-    total_height = 90 + 460 + len(oscillators) * 172 + 40
+    total_height = 110 + 460 + len(oscillators) * 172 + 40
 
     widget_html = f"""
     <style>
@@ -457,12 +457,26 @@ def _render_unified_chart(
       .dtool-select, .dtool-btn {{ background: {ui_theme.PANEL_RAISED}; color: {ui_theme.MUTED}; border: 1px solid {ui_theme.BORDER};
         border-radius: 6px; padding: 6px 10px; font-size: 0.78rem; cursor: pointer; font-family: inherit; }}
       .dtool-btn:hover {{ color: {ui_theme.INK}; }}
+      .dtool-btn:disabled {{ opacity: 0.4; cursor: default; }}
       .dtool-hint {{ color: {ui_theme.MUTED_2}; font-size: 0.72rem; padding-left: 4px; }}
       .osc-label {{ font-size: 0.72rem; color: {ui_theme.MUTED_2}; margin: 8px 0 2px; }}
+      .chart-row {{ display: flex; gap: 10px; align-items: flex-start; }}
+      .chart-col {{ flex: 1; min-width: 0; }}
+      .dlist-panel {{ width: 190px; flex-shrink: 0; background: {ui_theme.PANEL_RAISED}; border: 1px solid {ui_theme.BORDER};
+        border-radius: 8px; padding: 8px; max-height: 460px; overflow-y: auto; box-sizing: border-box; }}
+      .dlist-header {{ font-size: 0.7rem; color: {ui_theme.MUTED_2}; text-transform: uppercase; letter-spacing: 0.03em; margin-bottom: 6px; }}
+      .dlist-empty {{ font-size: 0.75rem; color: {ui_theme.MUTED_2}; }}
+      .dlist-row {{ display: flex; align-items: center; gap: 2px; padding: 5px 4px; border-radius: 5px; cursor: pointer; }}
+      .dlist-row:hover {{ background: {ui_theme.PANEL}; }}
+      .dlist-row.selected {{ background: {ui_theme.NAVY_LIGHT}22; }}
+      .dlist-row.hidden-row .dlist-label {{ opacity: 0.45; }}
+      .dlist-label {{ flex: 1; min-width: 0; font-size: 0.75rem; color: {ui_theme.INK}; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }}
+      .dlist-icon {{ background: none; border: none; color: {ui_theme.MUTED}; cursor: pointer; font-size: 0.75rem; padding: 2px 3px; border-radius: 4px; line-height: 1; }}
+      .dlist-icon:hover {{ background: {ui_theme.BORDER}; }}
     </style>
     <div class="dtool-bar">
       <select class="dtool-select" id="tool-select">
-        <option value="cursor">Cursor</option>
+        <option value="cursor">Cursor (select / drag)</option>
         <option value="trendline">Trend Line</option>
         <option value="ray">Ray</option>
         <option value="extline">Extended Line</option>
@@ -476,11 +490,21 @@ def _render_unified_chart(
         <option value="shortpos">Short Position</option>
         <option value="text">Text</option>
       </select>
+      <button class="dtool-btn" id="tool-delete-selected">Delete Selected</button>
       <button class="dtool-btn" id="tool-undo">Undo</button>
+      <button class="dtool-btn" id="tool-redo">Redo</button>
       <button class="dtool-btn" id="tool-clear">Clear All</button>
       <span class="dtool-hint" id="dtool-hint"></span>
     </div>
-    <div id="{container_id}" style="height:460px;width:100%"></div>
+    <div class="chart-row">
+      <div class="chart-col">
+        <div id="{container_id}" style="height:460px;width:100%"></div>
+      </div>
+      <div class="dlist-panel">
+        <div class="dlist-header">Drawings</div>
+        <div id="{container_id}_list"></div>
+      </div>
+    </div>
     <div id="{container_id}_osc"></div>
     <script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
     <script>
@@ -494,6 +518,7 @@ def _render_unified_chart(
       const STORAGE_KEY = "pt_drawings::{container_id}";
       const FIRST_TIME = CANDLES.length ? CANDLES[0].time : null;
       const LAST_TIME = CANDLES.length ? CANDLES[CANDLES.length - 1].time : null;
+      const SEL_COLOR = "{ui_theme.INK}";
 
       const container = document.getElementById("{container_id}");
       const chart = LightweightCharts.createChart(container, {{
@@ -565,7 +590,18 @@ def _render_unified_chart(
       chart.timeScale().subscribeVisibleLogicalRangeChange(() => syncFrom(chart));
       subCharts.forEach(sc => sc.timeScale().subscribeVisibleLogicalRangeChange(() => syncFrom(sc)));
 
-      // --- Drawing tools -----------------------------------------------------------------
+      // --- Drawing engine ------------------------------------------------------------------
+      // Every drawing is a plain object {{id, type, locked, hidden, ...type-specific fields}}
+      // in `saved`. paintDrawing() is the only thing that turns a descriptor into chart
+      // objects, and redrawAll() always wipes and fully re-paints from `saved` - simpler and
+      // far less bug-prone than trying to incrementally patch individual chart objects, and
+      // fast enough at the number of drawings a person actually makes on one chart.
+      //
+      // Selecting/dragging is scoped to a drawing's own control points (its endpoints, or its
+      // one anchor point for single-point types) rather than full shape-body hit-testing along
+      // a line or inside a rectangle - clicking near an endpoint selects and, if not locked,
+      // starts dragging it. A smaller, honestly-scoped interaction model than every TradingView
+      // drawing tool's own hand-tuned hit-testing, not an attempt to fully match it.
       function timeToIndex(time) {{
         for (let i = 0; i < CANDLES.length; i++) {{ if (CANDLES[i].time === time) return i; }}
         return -1;
@@ -577,47 +613,111 @@ def _render_unified_chart(
         const slope = (p2.price - p1.price) / (i2 - i1);
         return p1.price + slope * (it - i1);
       }}
+      function closeAtTime(time) {{
+        const idx = timeToIndex(time);
+        return idx >= 0 ? CANDLES[idx].close : null;
+      }}
+      let idCounter = 0;
+      function genId() {{ return "d" + Date.now() + "_" + (idCounter++); }}
 
       let saved = [];
       try {{ saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]"); }} catch (e) {{ saved = []; }}
+      saved.forEach(d => {{
+        if (!d.id) d.id = genId();
+        if (d.locked === undefined) d.locked = false;
+        if (d.hidden === undefined) d.hidden = false;
+      }});
+      let selectedId = null;
+      let undoStack = [];
+      let redoStack = [];
+      let dragState = null;
       let drawnSeries = [];
       let drawnPriceLines = [];
 
       function persist() {{
         try {{ localStorage.setItem(STORAGE_KEY, JSON.stringify(saved)); }} catch (e) {{ /* storage unavailable - drawing still works this session */ }}
       }}
+      function pushUndo() {{
+        undoStack.push(JSON.stringify(saved));
+        if (undoStack.length > 50) undoStack.shift();
+        redoStack = [];
+      }}
+      function undo() {{
+        if (!undoStack.length) return;
+        redoStack.push(JSON.stringify(saved));
+        saved = JSON.parse(undoStack.pop());
+        selectedId = null;
+        redrawAll(); persist(); renderObjectList();
+      }}
+      function redo() {{
+        if (!redoStack.length) return;
+        undoStack.push(JSON.stringify(saved));
+        saved = JSON.parse(redoStack.pop());
+        selectedId = null;
+        redrawAll(); persist(); renderObjectList();
+      }}
+
+      // Each entry: {{ get: () => {{time, price}} (price may be null - not every type has one
+      // for display), set: (time, price) => mutates d in place }}. Used for both dragging and
+      // for rendering the small "handle" markers on a selected drawing.
+      function getControlPoints(d) {{
+        if (["trendline", "ray", "extline", "channel", "rect", "fib"].includes(d.type)) {{
+          return [
+            {{ get: () => d.p1, set: (time, price) => {{ d.p1 = {{ time, price }}; }} }},
+            {{ get: () => d.p2, set: (time, price) => {{ d.p2 = {{ time, price }}; }} }},
+          ];
+        }}
+        if (d.type === "hline") {{
+          return [{{ get: () => ({{ time: LAST_TIME, price: d.price }}), set: (time, price) => {{ d.price = price; }} }}];
+        }}
+        if (d.type === "hray") {{
+          return [{{ get: () => ({{ time: d.time, price: d.price }}), set: (time, price) => {{ d.time = time; d.price = price; }} }}];
+        }}
+        if (d.type === "vwap") {{
+          return [{{ get: () => ({{ time: d.anchorTime, price: closeAtTime(d.anchorTime) }}), set: (time) => {{ d.anchorTime = time; }} }}];
+        }}
+        if (d.type === "position") {{
+          return [{{ get: () => ({{ time: d.entryTime, price: d.entry }}), set: (time, price) => {{ d.entryTime = time; d.entry = price; }} }}];
+        }}
+        if (d.type === "text") {{
+          return [{{ get: () => ({{ time: d.time, price: closeAtTime(d.time) }}), set: (time) => {{ d.time = time; }} }}];
+        }}
+        return [];
+      }}
 
       function paintDrawing(d) {{
+        if (d.hidden) return;
+        const isSel = d.id === selectedId;
         if (d.type === "trendline") {{
-          const s = chart.addLineSeries({{ color: "{ui_theme.NAVY_LIGHT}", lineWidth: 2 }});
+          const s = chart.addLineSeries({{ color: isSel ? SEL_COLOR : "{ui_theme.NAVY_LIGHT}", lineWidth: isSel ? 3 : 2 }});
           s.setData([{{ time: d.p1.time, value: d.p1.price }}, {{ time: d.p2.time, value: d.p2.price }}]);
           drawnSeries.push(s);
         }} else if (d.type === "ray") {{
           const extPrice = priceAt(d.p1, d.p2, LAST_TIME);
-          const s = chart.addLineSeries({{ color: "{ui_theme.NAVY_LIGHT}", lineWidth: 2 }});
+          const s = chart.addLineSeries({{ color: isSel ? SEL_COLOR : "{ui_theme.NAVY_LIGHT}", lineWidth: isSel ? 3 : 2 }});
           s.setData([{{ time: d.p1.time, value: d.p1.price }}, {{ time: LAST_TIME, value: extPrice }}]);
           drawnSeries.push(s);
         }} else if (d.type === "extline") {{
           const rightPrice = priceAt(d.p1, d.p2, LAST_TIME);
           const leftPrice = priceAt(d.p2, d.p1, FIRST_TIME);
-          const s = chart.addLineSeries({{ color: "{ui_theme.NAVY_LIGHT}", lineWidth: 1, lineStyle: 1 }});
+          const s = chart.addLineSeries({{ color: isSel ? SEL_COLOR : "{ui_theme.NAVY_LIGHT}", lineWidth: isSel ? 2 : 1, lineStyle: 1 }});
           s.setData([{{ time: FIRST_TIME, value: leftPrice }}, {{ time: LAST_TIME, value: rightPrice }}]);
           drawnSeries.push(s);
         }} else if (d.type === "hline") {{
           const pl = candleSeries.createPriceLine({{
-            price: d.price, color: "{ui_theme.CYAN}", lineWidth: 1, lineStyle: 2,
+            price: d.price, color: isSel ? SEL_COLOR : "{ui_theme.CYAN}", lineWidth: isSel ? 2 : 1, lineStyle: 2,
             axisLabelVisible: true, title: "Level",
           }});
           drawnPriceLines.push(pl);
         }} else if (d.type === "hray") {{
-          const s = chart.addLineSeries({{ color: "{ui_theme.CYAN}", lineWidth: 1, lineStyle: 2 }});
+          const s = chart.addLineSeries({{ color: isSel ? SEL_COLOR : "{ui_theme.CYAN}", lineWidth: isSel ? 2 : 1, lineStyle: 2 }});
           s.setData([{{ time: d.time, value: d.price }}, {{ time: LAST_TIME, value: d.price }}]);
           drawnSeries.push(s);
         }} else if (d.type === "channel") {{
-          const s1 = chart.addLineSeries({{ color: "{ui_theme.NAVY_LIGHT}", lineWidth: 2 }});
+          const s1 = chart.addLineSeries({{ color: isSel ? SEL_COLOR : "{ui_theme.NAVY_LIGHT}", lineWidth: isSel ? 3 : 2 }});
           s1.setData([{{ time: d.p1.time, value: d.p1.price }}, {{ time: d.p2.time, value: d.p2.price }}]);
           drawnSeries.push(s1);
-          const s2 = chart.addLineSeries({{ color: "{ui_theme.NAVY_LIGHT}", lineWidth: 1, lineStyle: 2 }});
+          const s2 = chart.addLineSeries({{ color: isSel ? SEL_COLOR : "{ui_theme.NAVY_LIGHT}", lineWidth: 1, lineStyle: 2 }});
           s2.setData([{{ time: d.p1.time, value: d.p1.price + d.offset }}, {{ time: d.p2.time, value: d.p2.price + d.offset }}]);
           drawnSeries.push(s2);
         }} else if (d.type === "rect") {{
@@ -627,7 +727,7 @@ def _render_unified_chart(
           const last = timeIsBefore(d.p1.time, d.p2.time) ? d.p2.time : d.p1.time;
           const area = chart.addAreaSeries({{
             topColor: "rgba(166,132,255,0.28)", bottomColor: "rgba(166,132,255,0.06)",
-            lineColor: "{ui_theme.NAVY_LIGHT}", lineWidth: 1, baseValue: {{ type: "price", price: bottom }},
+            lineColor: isSel ? SEL_COLOR : "{ui_theme.NAVY_LIGHT}", lineWidth: isSel ? 2 : 1, baseValue: {{ type: "price", price: bottom }},
           }});
           area.setData([{{ time: first, value: top }}, {{ time: last, value: top }}]);
           drawnSeries.push(area);
@@ -635,7 +735,7 @@ def _render_unified_chart(
           FIB_LEVELS.forEach(pct => {{
             const price = d.p1.price + (d.p2.price - d.p1.price) * pct;
             const pl = candleSeries.createPriceLine({{
-              price, color: "{ui_theme.WARN}", lineWidth: 1, lineStyle: 2,
+              price, color: isSel ? SEL_COLOR : "{ui_theme.WARN}", lineWidth: isSel ? 2 : 1, lineStyle: 2,
               axisLabelVisible: true, title: (pct * 100).toFixed(1) + "%",
             }});
             drawnPriceLines.push(pl);
@@ -652,7 +752,7 @@ def _render_unified_chart(
             cumPV += typical * vol; cumV += vol;
             data.push({{ time: c.time, value: cumV > 0 ? cumPV / cumV : typical }});
           }}
-          const s = chart.addLineSeries({{ color: "{ui_theme.WARN}", lineWidth: 2 }});
+          const s = chart.addLineSeries({{ color: isSel ? SEL_COLOR : "{ui_theme.WARN}", lineWidth: isSel ? 3 : 2 }});
           s.setData(data);
           drawnSeries.push(s);
         }} else if (d.type === "position") {{
@@ -673,13 +773,20 @@ def _render_unified_chart(
           drawnSeries.push(rewardArea);
           const rr = Math.abs(d.target - d.entry) / (Math.abs(d.entry - d.stop) || 1);
           const pl = candleSeries.createPriceLine({{
-            price: d.entry, color: "{ui_theme.INK}", lineWidth: 1, lineStyle: 0, axisLabelVisible: true,
+            price: d.entry, color: isSel ? SEL_COLOR : "{ui_theme.INK}", lineWidth: isSel ? 2 : 1, lineStyle: 0, axisLabelVisible: true,
             title: (d.side === "long" ? "Long" : "Short") + " entry (R:R " + rr.toFixed(2) + ")",
           }});
           drawnPriceLines.push(pl);
         }} else if (d.type === "text") {{
-          textMarkers.push({{ time: d.time, position: "aboveBar", color: "{ui_theme.WARN}", shape: "circle", text: d.text }});
-          refreshMarkers();
+          textMarkers.push({{ time: d.time, position: "aboveBar", color: isSel ? SEL_COLOR : "{ui_theme.WARN}", shape: "circle", text: d.text }});
+        }}
+        if (isSel) {{
+          const cps = getControlPoints(d).map(cp => cp.get()).filter(p => p.price !== null);
+          if (cps.length) {{
+            const handles = chart.addLineSeries({{ color: SEL_COLOR, lineVisible: false, pointMarkersVisible: true, pointMarkersRadius: 5 }});
+            handles.setData(cps.map(p => ({{ time: p.time, value: p.price }})));
+            drawnSeries.push(handles);
+          }}
         }}
       }}
 
@@ -692,14 +799,81 @@ def _render_unified_chart(
         for (const d of saved) paintDrawing(d);
         refreshMarkers();
       }}
-      for (const d of saved) paintDrawing(d);
+      redrawAll();
 
+      // --- Object list panel ----------------------------------------------------------------
+      const TYPE_LABELS = {{
+        trendline: "Trend Line", ray: "Ray", extline: "Extended Line", hline: "Horizontal Line",
+        hray: "Horizontal Ray", channel: "Parallel Channel", rect: "Rectangle",
+        fib: "Fibonacci Retracement", vwap: "Anchored VWAP", text: "Text",
+      }};
+      function drawingLabel(d) {{
+        if (d.type === "text") return "Text: " + (d.text.length > 16 ? d.text.slice(0, 16) + "\\u2026" : d.text);
+        if (d.type === "position") return (d.side === "long" ? "Long" : "Short") + " Position";
+        return TYPE_LABELS[d.type] || d.type;
+      }}
+      function selectDrawing(id) {{ selectedId = id; redrawAll(); renderObjectList(); }}
+      function deleteDrawing(id) {{
+        const d = saved.find(s => s.id === id);
+        if (!d || d.locked) return;
+        pushUndo();
+        saved = saved.filter(s => s.id !== id);
+        if (selectedId === id) selectedId = null;
+        redrawAll(); persist(); renderObjectList();
+      }}
+      function renderObjectList() {{
+        const list = document.getElementById("{container_id}_list");
+        list.innerHTML = "";
+        if (!saved.length) {{
+          const empty = document.createElement("div");
+          empty.className = "dlist-empty";
+          empty.textContent = "No drawings yet.";
+          list.appendChild(empty);
+        }}
+        saved.forEach(d => {{
+          const row = document.createElement("div");
+          row.className = "dlist-row" + (d.id === selectedId ? " selected" : "") + (d.hidden ? " hidden-row" : "");
+          row.addEventListener("click", () => selectDrawing(d.id));
+
+          const label = document.createElement("span");
+          label.className = "dlist-label";
+          label.textContent = drawingLabel(d);
+          row.appendChild(label);
+
+          const lockBtn = document.createElement("button");
+          lockBtn.className = "dlist-icon";
+          lockBtn.textContent = d.locked ? "\\ud83d\\udd12" : "\\ud83d\\udd13";
+          lockBtn.title = d.locked ? "Unlock" : "Lock";
+          lockBtn.addEventListener("click", e => {{ e.stopPropagation(); d.locked = !d.locked; persist(); renderObjectList(); }});
+          row.appendChild(lockBtn);
+
+          const hideBtn = document.createElement("button");
+          hideBtn.className = "dlist-icon";
+          hideBtn.textContent = d.hidden ? "\\ud83d\\ude48" : "\\ud83d\\udc41";
+          hideBtn.title = d.hidden ? "Show" : "Hide";
+          hideBtn.addEventListener("click", e => {{ e.stopPropagation(); d.hidden = !d.hidden; redrawAll(); persist(); renderObjectList(); }});
+          row.appendChild(hideBtn);
+
+          const delBtn = document.createElement("button");
+          delBtn.className = "dlist-icon";
+          delBtn.textContent = "\\u2715";
+          delBtn.title = "Delete";
+          delBtn.addEventListener("click", e => {{ e.stopPropagation(); deleteDrawing(d.id); }});
+          row.appendChild(delBtn);
+
+          list.appendChild(row);
+        }});
+      }}
+      renderObjectList();
+
+      // --- Toolbar: tool select, delete selected, undo/redo, clear all ----------------------
       const CLICKS_NEEDED = {{
         cursor: 0, trendline: 2, ray: 2, extline: 2, hline: 1, hray: 1,
         channel: 3, rect: 2, fib: 2, vwap: 1, longpos: 1, shortpos: 1, text: 1,
       }};
       const HINTS = {{
-        cursor: "", trendline: "Click a start point, then an end point.",
+        cursor: "Click near a drawing's endpoint to select/drag it. Delete/Backspace removes the selection; Ctrl+Z/Ctrl+Y undo/redo.",
+        trendline: "Click a start point, then an end point.",
         ray: "Click a start point, then a second - the line extends past it.",
         extline: "Click two points - the line extends beyond both.",
         hline: "Click a price for a level across the whole chart.",
@@ -720,16 +894,25 @@ def _render_unified_chart(
         clickBuffer = [];
         document.getElementById("dtool-hint").textContent = HINTS[activeTool] || "";
       }});
-      document.getElementById("tool-undo").addEventListener("click", () => {{
-        if (!saved.length) return;
-        saved.pop();
-        redrawAll();
-        persist();
-      }});
+      document.getElementById("tool-delete-selected").addEventListener("click", () => {{ if (selectedId) deleteDrawing(selectedId); }});
+      document.getElementById("tool-undo").addEventListener("click", undo);
+      document.getElementById("tool-redo").addEventListener("click", redo);
       document.getElementById("tool-clear").addEventListener("click", () => {{
+        if (!saved.length) return;
+        pushUndo();
         saved = [];
-        redrawAll();
-        persist();
+        selectedId = null;
+        redrawAll(); persist(); renderObjectList();
+      }});
+      document.addEventListener("keydown", e => {{
+        const key = e.key.toLowerCase();
+        if ((key === "delete" || key === "backspace") && selectedId) {{
+          e.preventDefault(); deleteDrawing(selectedId);
+        }} else if ((e.ctrlKey || e.metaKey) && key === "z" && !e.shiftKey) {{
+          e.preventDefault(); undo();
+        }} else if ((e.ctrlKey || e.metaKey) && (key === "y" || (key === "z" && e.shiftKey))) {{
+          e.preventDefault(); redo();
+        }}
       }});
 
       function finalizeDrawing() {{
@@ -760,9 +943,10 @@ def _render_unified_chart(
           d = {{ type: "text", time: pts[0].time, text: label }};
         }}
         if (d) {{
-          paintDrawing(d);
+          d.id = genId(); d.locked = false; d.hidden = false;
+          pushUndo();
           saved.push(d);
-          persist();
+          redrawAll(); persist(); renderObjectList();
         }}
         clickBuffer = [];
       }}
@@ -774,15 +958,83 @@ def _render_unified_chart(
         clickBuffer.push({{ time: param.time, price }});
         if (clickBuffer.length >= CLICKS_NEEDED[activeTool]) finalizeDrawing();
       }});
+
+      // --- Cursor mode: select and drag an existing drawing's control point -----------------
+      const HIT_RADIUS_PX = 10;
+      function pxPoint(time, price) {{
+        const x = chart.timeScale().timeToCoordinate(time);
+        const y = candleSeries.priceToCoordinate(price);
+        return (x === null || y === null) ? null : {{ x, y }};
+      }}
+      function findControlPointAt(clickX, clickY) {{
+        let best = null, bestDist = HIT_RADIUS_PX;
+        for (const d of saved) {{
+          if (d.hidden) continue;
+          const cps = getControlPoints(d);
+          for (let i = 0; i < cps.length; i++) {{
+            const p = cps[i].get();
+            if (p.price === null) continue;
+            const px = pxPoint(p.time, p.price);
+            if (!px) continue;
+            const dist = Math.hypot(px.x - clickX, px.y - clickY);
+            if (dist <= bestDist) {{ bestDist = dist; best = {{ d, pointIndex: i }}; }}
+          }}
+        }}
+        return best;
+      }}
+      container.addEventListener("mousedown", e => {{
+        if (activeTool !== "cursor") return;
+        const rect = container.getBoundingClientRect();
+        const clickX = e.clientX - rect.left, clickY = e.clientY - rect.top;
+        const hit = findControlPointAt(clickX, clickY);
+        if (hit) {{
+          selectedId = hit.d.id;
+          if (!hit.d.locked) {{
+            dragState = {{ id: hit.d.id, pointIndex: hit.pointIndex, preSnapshot: JSON.stringify(saved) }};
+            chart.applyOptions({{ handleScroll: false, handleScale: false }});
+          }}
+        }} else {{
+          selectedId = null;
+        }}
+        redrawAll(); renderObjectList();
+      }});
+      container.addEventListener("mousemove", e => {{
+        if (!dragState) return;
+        const rect = container.getBoundingClientRect();
+        const x = e.clientX - rect.left, y = e.clientY - rect.top;
+        const time = chart.timeScale().coordinateToTime(x);
+        const price = candleSeries.coordinateToPrice(y);
+        if (time === null || price === null) return;
+        const d = saved.find(s => s.id === dragState.id);
+        if (!d) return;
+        const cps = getControlPoints(d);
+        if (cps[dragState.pointIndex]) {{
+          cps[dragState.pointIndex].set(time, price);
+          redrawAll();
+        }}
+      }});
+      window.addEventListener("mouseup", () => {{
+        if (!dragState) return;
+        undoStack.push(dragState.preSnapshot);
+        if (undoStack.length > 50) undoStack.shift();
+        redoStack = [];
+        dragState = null;
+        chart.applyOptions({{ handleScroll: true, handleScale: true }});
+        persist(); renderObjectList();
+      }});
     </script>
     """
     st.components.v1.html(widget_html, height=total_height, scrolling=False)
     st.caption(
         "Trend line, ray, extended line, horizontal line/ray, parallel channel, rectangle, "
         "Fibonacci retracement, anchored VWAP, and a long/short position tool - a working "
-        "subset of TradingView's own drawing catalog, not full parity with it. Drawings are "
-        "saved per stock and timeframe in this browser and stay put across refreshes and tab "
-        "switches; clearing the browser's site data (or a different browser/device) starts fresh."
+        "subset of TradingView's own drawing catalog, not full parity with it. Select a drawing "
+        "by clicking near one of its endpoints (shown highlighted with small handles), drag a "
+        "handle to reshape it, or use the list on the right - lock, hide, or delete each one "
+        "individually. Delete/Backspace removes the current selection; Ctrl+Z/Ctrl+Y undo and "
+        "redo. Drawings are saved per stock and timeframe in this browser and stay put across "
+        "refreshes and tab switches; clearing the browser's site data (or a different browser/"
+        "device) starts fresh."
     )
 
 
