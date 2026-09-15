@@ -14,6 +14,7 @@ tick-real-time - same framing the rest of Paper Trading already uses.
 from __future__ import annotations
 
 import datetime as dt
+import json
 
 import pandas as pd
 import streamlit as st
@@ -443,6 +444,170 @@ def _render_financials_panel(ticker: str) -> None:
         st.markdown(f"[Visit website ↗]({stats['website']})")
 
 
+def _render_drawing_chart(ticker: str, timeframe: str, hist: pd.DataFrame, transactions: list, avg_cost: float | None) -> None:
+    """
+    A second, hand-built chart with TradingView-style drawing tools (trend line, horizontal
+    ray, text note) that the tradeable chart above can't offer: it renders through
+    streamlit_lightweight_charts, a pre-built component we only get to configure declaratively
+    (candles/lines/markers), not extend with custom mouse-driven interactions.
+
+    Embedding TradingView's own real "Advanced Chart" widget was tried first and abandoned:
+    confirmed directly against TradingView's own embed endpoint that NSE (India) symbols are
+    blocked on the free public widget ("This symbol is only available on TradingView") while a
+    US ticker like AAPL loads fine - since this app's own default watchlist and branding is
+    India-first (NIFTY/SENSEX, RELIANCE.NS/TCS.NS/INFY.NS), that would have made drawing tools
+    work for a minority of this app's stocks. This chart instead loads TradingView's own
+    *open-source* Lightweight Charts library fresh via CDN (not through the Python wrapper
+    above) so this app's own code can drive it directly and wire up real click-to-draw tools,
+    working identically for every ticker since it's built on this app's own Yahoo Finance data.
+
+    Drawings live only in this component's own iframe, which Streamlit tears down and rebuilds
+    on every script rerun (this page's own 25s autorefresh included, same as the tradeable
+    chart above already does) - there's no channel back to Python to persist them, since
+    st.components.v1.html is one-way. Disclosed in the caption rather than hidden.
+    """
+    time_col = "Date" if "Date" in hist.columns else "Datetime"
+    is_intraday = timeframe not in ("1D", "1W", "1M")
+    times = hist[time_col]
+
+    def t(ts):
+        return int(ts.timestamp()) if is_intraday else ts.strftime("%Y-%m-%d")
+
+    candles = [
+        {
+            "time": t(row[time_col]), "open": float(row["Open"]), "high": float(row["High"]),
+            "low": float(row["Low"]), "close": float(row["Close"]),
+        }
+        for _, row in hist.iterrows()
+    ]
+    trade_markers = []
+    for txn in (transactions or []):
+        is_buy = txn.side == "BUY"
+        trade_markers.append({
+            "time": t(dt.datetime.fromisoformat(txn.timestamp)),
+            "position": "belowBar" if is_buy else "aboveBar",
+            "color": ui_theme.BULL if is_buy else ui_theme.BEAR,
+            "shape": "arrowUp" if is_buy else "arrowDown",
+            "text": f"{txn.side} {txn.quantity:g} @ {txn.price:,.2f}",
+        })
+    candles_json = json.dumps(candles)
+    trade_markers_json = json.dumps(trade_markers)
+    avg_cost_json = json.dumps(float(avg_cost)) if avg_cost is not None else "null"
+    container_id = f"draw_{ticker.replace('.', '_').replace('^', '')}_{timeframe}"
+
+    widget_html = f"""
+    <style>
+      body {{ margin: 0; font-family: 'IBM Plex Sans', -apple-system, sans-serif; }}
+      .dtool-bar {{ display: flex; gap: 6px; padding: 6px 0 10px; flex-wrap: wrap; }}
+      .dtool-btn {{ background: {ui_theme.PANEL_RAISED}; color: {ui_theme.MUTED}; border: 1px solid {ui_theme.BORDER};
+        border-radius: 6px; padding: 6px 12px; font-size: 0.78rem; cursor: pointer; }}
+      .dtool-btn.active {{ background: {ui_theme.NAVY_LIGHT}22; color: {ui_theme.NAVY_LIGHT}; border-color: {ui_theme.NAVY_LIGHT}; }}
+      .dtool-btn:hover {{ color: {ui_theme.INK}; }}
+      .dtool-hint {{ color: {ui_theme.MUTED_2}; font-size: 0.72rem; padding-left: 4px; align-self: center; }}
+    </style>
+    <div class="dtool-bar">
+      <button class="dtool-btn active" id="tool-cursor">Cursor</button>
+      <button class="dtool-btn" id="tool-trendline">Trend Line</button>
+      <button class="dtool-btn" id="tool-hline">Horizontal Line</button>
+      <button class="dtool-btn" id="tool-text">Text</button>
+      <button class="dtool-btn" id="tool-clear">Clear All</button>
+      <span class="dtool-hint" id="dtool-hint"></span>
+    </div>
+    <div id="{container_id}" style="height:460px;width:100%"></div>
+    <script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
+    <script>
+      const CANDLES = {candles_json};
+      const TRADE_MARKERS = {trade_markers_json};
+      const AVG_COST = {avg_cost_json};
+      const container = document.getElementById("{container_id}");
+      const chart = LightweightCharts.createChart(container, {{
+        width: container.clientWidth, height: 460,
+        layout: {{ background: {{ color: "{ui_theme.BLACK}" }}, textColor: "{ui_theme.MUTED}" }},
+        grid: {{ vertLines: {{ color: "{ui_theme.BORDER}" }}, horzLines: {{ color: "{ui_theme.BORDER}" }} }},
+        rightPriceScale: {{ borderColor: "{ui_theme.BORDER}" }},
+        timeScale: {{ borderColor: "{ui_theme.BORDER}", timeVisible: true }},
+        crosshair: {{ mode: 0 }},
+      }});
+      const candleSeries = chart.addCandlestickSeries({{
+        upColor: "{ui_theme.BULL}", downColor: "{ui_theme.BEAR}", borderVisible: false,
+        wickUpColor: "{ui_theme.BULL}", wickDownColor: "{ui_theme.BEAR}",
+      }});
+      candleSeries.setData(CANDLES);
+      let textMarkers = [];
+      function refreshMarkers() {{ candleSeries.setMarkers([...TRADE_MARKERS, ...textMarkers]); }}
+      if (TRADE_MARKERS.length) refreshMarkers();
+      if (AVG_COST !== null && CANDLES.length > 0) {{
+        const avgSeries = chart.addLineSeries({{ color: "{ui_theme.MUTED_2}", lineWidth: 1, lineStyle: 2 }});
+        avgSeries.setData([{{time: CANDLES[0].time, value: AVG_COST}}, {{time: CANDLES[CANDLES.length - 1].time, value: AVG_COST}}]);
+      }}
+      new ResizeObserver(entries => {{
+        chart.applyOptions({{ width: entries[0].contentRect.width }});
+      }}).observe(container);
+
+      let activeTool = "cursor";
+      let pendingPoint = null;
+      let drawnSeries = [];
+      const hints = {{
+        cursor: "", trendline: "Click a start point, then an end point.",
+        hline: "Click a price to draw a horizontal level.", text: "Click a point to add a text note.",
+      }};
+      function setActiveTool(tool) {{
+        activeTool = tool;
+        pendingPoint = null;
+        document.querySelectorAll(".dtool-btn").forEach(b => b.classList.remove("active"));
+        const btn = document.getElementById("tool-" + tool);
+        if (btn) btn.classList.add("active");
+        document.getElementById("dtool-hint").textContent = hints[tool] || "";
+      }}
+      document.getElementById("tool-cursor").addEventListener("click", () => setActiveTool("cursor"));
+      document.getElementById("tool-trendline").addEventListener("click", () => setActiveTool("trendline"));
+      document.getElementById("tool-hline").addEventListener("click", () => setActiveTool("hline"));
+      document.getElementById("tool-text").addEventListener("click", () => setActiveTool("text"));
+      document.getElementById("tool-clear").addEventListener("click", () => {{
+        drawnSeries.forEach(s => chart.removeSeries(s));
+        drawnSeries = [];
+        textMarkers = [];
+        refreshMarkers();
+        pendingPoint = null;
+      }});
+
+      chart.subscribeClick(param => {{
+        if (activeTool === "cursor" || !param.point || !param.time) return;
+        const price = candleSeries.coordinateToPrice(param.point.y);
+        if (price === null) return;
+        const time = param.time;
+
+        if (activeTool === "trendline") {{
+          if (!pendingPoint) {{
+            pendingPoint = {{ time, price }};
+          }} else {{
+            const line = chart.addLineSeries({{ color: "{ui_theme.NAVY_LIGHT}", lineWidth: 2 }});
+            line.setData([{{ time: pendingPoint.time, value: pendingPoint.price }}, {{ time, value: price }}]);
+            drawnSeries.push(line);
+            pendingPoint = null;
+          }}
+        }} else if (activeTool === "hline") {{
+          const line = chart.addLineSeries({{ color: "{ui_theme.CYAN}", lineWidth: 1, lineStyle: 2 }});
+          line.setData([{{ time: CANDLES[0].time, value: price }}, {{ time: CANDLES[CANDLES.length - 1].time, value: price }}]);
+          drawnSeries.push(line);
+        }} else if (activeTool === "text") {{
+          const label = prompt("Annotation text:");
+          if (label) {{
+            textMarkers.push({{ time, position: "aboveBar", color: "{ui_theme.WARN}", shape: "circle", text: label }});
+            refreshMarkers();
+          }}
+        }}
+      }});
+    </script>
+    """
+    st.components.v1.html(widget_html, height=510, scrolling=False)
+    st.caption(
+        "Drawn on this app's own live data, so it works the same for every stock. Drawings live only "
+        "in this chart and clear whenever the page reruns (switching tabs, the 25s auto-refresh, or "
+        "any other action on this page) - a limit of embedding this without a full custom component."
+    )
+
+
 def render_stock_detail(user_key: str, cash: float, ticker: str) -> None:
     st_autorefresh(interval=DETAIL_AUTOREFRESH_MS, key="mkt_detail_autorefresh")
 
@@ -488,6 +653,9 @@ def render_stock_detail(user_key: str, cash: float, ticker: str) -> None:
         ", and the dashed line is your average cost." if held else "."
     )
     st.caption(f"Showing {period} of {interval} bars - Yahoo Finance's own maximum lookback at this resolution.{trade_note}")
+
+    with st.expander("🖊️ Draw on Chart — trend lines, horizontal levels, text notes", key=f"mkt_draw_expander_{ticker}"):
+        _render_drawing_chart(ticker, timeframe, hist, transactions, held.avg_cost if held else None)
 
     st.divider()
     _render_financials_panel(ticker)
