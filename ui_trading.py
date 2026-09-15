@@ -316,10 +316,12 @@ def _watchlist_sidebar() -> None:
                 )
             else:
                 rc2.markdown('<div class="pt-watch-px">n/a</div>', unsafe_allow_html=True)
-            wcol1, wcol2 = st.columns(2)
+            wcol1, wcol2, wcol3 = st.columns(3)
             if wcol1.button("Trade", key=f"watch_trade_{t}", use_container_width=True):
                 st.session_state["pt_ticker_input"] = t
-            if wcol2.button("Remove", key=f"watch_remove_{t}", use_container_width=True):
+            if wcol2.button("Chart", key=f"watch_chart_{t}", use_container_width=True):
+                _goto_chart(t, t)
+            if wcol3.button("✕", key=f"watch_remove_{t}", use_container_width=True, help="Remove from watchlist"):
                 watchlist.remove(t)
                 st.toast(f"Removed {t} from watchlist", icon="🗑️")
                 st.rerun()
@@ -337,6 +339,26 @@ def _summary_card(cash: float, holdings_value: float) -> float:
         unsafe_allow_html=True,
     )
     return net_worth
+
+
+def _goto_chart(ticker: str, name: str) -> None:
+    """Jump straight to that ticker's chart in the Markets tab, from anywhere in the app -
+    the sidebar Watchlist, Popular Stocks, or Holdings. Streamlit's own st.tabs() has no
+    server-side way to activate a different tab (the Markets tab's own "View Chart" buttons
+    don't need this - they're already on that pill), which is why _dashboard() drives
+    navigation off session_state instead of st.tabs(); this just adds the one extra step
+    those in-tab buttons don't need: switching the active pill itself.
+
+    Can't assign st.session_state["pt_active_tab"] directly here: this runs from inside a
+    tab body (Home, Portfolio, ...), which renders *after* the segmented_control widget with
+    that key is already instantiated for this script run, and Streamlit raises
+    StreamlitWidgetAlreadyInstantiatedError on a same-run reassignment. Stashing it in a
+    plain key instead and applying it just before the widget is created on the rerun (see
+    _dashboard) sidesteps that - it only ever writes pt_active_tab pre-instantiation."""
+    st.session_state["mkt_selected_ticker"] = ticker
+    st.session_state["mkt_selected_name"] = name
+    st.session_state["_pt_goto_tab"] = "Markets"
+    st.rerun()
 
 
 def _popular_stocks_row() -> None:
@@ -366,8 +388,11 @@ def _popular_stocks_row() -> None:
                         ui_theme._flatten_html(f'<div class="pt-popular">{logo}<div class="pt-ticker-sym">{t}</div><div class="pt-ticker-px">n/a</div></div>'),
                         unsafe_allow_html=True,
                     )
-                if st.button("Trade", key=f"pop_trade_{t}", use_container_width=True):
+                pop_c1, pop_c2 = st.columns(2)
+                if pop_c1.button("Trade", key=f"pop_trade_{t}", use_container_width=True):
                     st.session_state["pt_ticker_input"] = t
+                if pop_c2.button("Chart", key=f"pop_chart_{t}", use_container_width=True):
+                    _goto_chart(t, t)
 
 
 def _order_panel(user_key: str, cash: float) -> None:
@@ -656,11 +681,21 @@ def _dashboard() -> None:
     live_prices_for_summary = get_live_prices(tuple(h.ticker for h in holdings_for_summary)) if holdings_for_summary else {}
     holdings_value = sum((live_prices_for_summary.get(h.ticker) or h.avg_cost) * h.quantity for h in holdings_for_summary)
 
-    tab_home, tab_markets, tab_orders, tab_portfolio, tab_benchmarks, tab_leaderboard = st.tabs(
-        ["Home", "Markets", "Orders", "Portfolio", "Benchmarks", "Leaderboard"]
+    # A session-state pill selector instead of st.tabs(): st.tabs() has no server-side way to
+    # activate a different tab, which is exactly what "click any stock, anywhere, see its
+    # chart" needs (see _goto_chart above) - Popular Stocks, the sidebar Watchlist, and
+    # Holdings all live outside the Markets pill and need to land the user on it.
+    if "_pt_goto_tab" in st.session_state:
+        st.session_state["pt_active_tab"] = st.session_state.pop("_pt_goto_tab")
+    active_tab = st.segmented_control(
+        "Navigate", ["Home", "Markets", "Orders", "Portfolio", "Benchmarks", "Leaderboard"],
+        default="Home", key="pt_active_tab", label_visibility="collapsed",
     )
+    if not active_tab:  # segmented_control can come back empty if deselected - same guard ui_app.py uses for its own scenario picker
+        active_tab = "Home"
+    st.write("")
 
-    with tab_home:
+    if active_tab == "Home":
         _summary_card(user.cash, holdings_value)
         st.caption("Simulated cash, real live prices. This page refreshes itself every ~20 seconds.")
         m1, m2, m3 = st.columns(3)
@@ -672,16 +707,16 @@ def _dashboard() -> None:
         st.divider()
         _order_panel(user_key, user.cash)
 
-    with tab_markets:
+    if active_tab == "Markets":
         if st.session_state.get("mkt_selected_ticker"):
             ui_trading_markets.render_stock_detail(user_key, user.cash, st.session_state["mkt_selected_ticker"])
         else:
             ui_trading_markets.render_movers_tab(user_key, user.cash)
 
-    with tab_orders:
+    if active_tab == "Orders":
         _transactions_table(user_key)
 
-    with tab_portfolio:
+    if active_tab == "Portfolio":
         c1, c2 = st.columns(2)
         c1.markdown(ui_theme.kpi_card("Cash", f"Rs. {user.cash:,.2f}", icon="wallet"), unsafe_allow_html=True)
         c2.markdown(ui_theme.kpi_card("Holdings Value", f"Rs. {holdings_value:,.2f}", icon="layers"), unsafe_allow_html=True)
@@ -689,13 +724,19 @@ def _dashboard() -> None:
         _holdings_orbit(user_key, user.cash)
         st.caption("Each planet is a position - size is its weight in the book, color is its own return. Hover for the numbers and today's move; the table below has the rest.")
         st.write("")
+        if holdings_for_summary:
+            st.caption("View chart:")
+            chip_cols = st.columns(len(holdings_for_summary))
+            for col, h in zip(chip_cols, holdings_for_summary):
+                if col.button(h.ticker, key=f"holding_chart_{h.ticker}", use_container_width=True):
+                    _goto_chart(h.ticker, h.ticker)
         _holdings_table(user_key)
 
-    with tab_benchmarks:
+    if active_tab == "Benchmarks":
         created_at = dt.datetime.fromisoformat(user.created_at).date()
         _benchmarks_tab(created_at, user.cash, holdings_for_summary, live_prices_for_summary)
 
-    with tab_leaderboard:
+    if active_tab == "Leaderboard":
         _leaderboard(user_key)
 
 
