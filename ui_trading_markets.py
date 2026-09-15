@@ -212,7 +212,7 @@ def _render_indicator_controls() -> dict:
     below - kept separate from it so the controls and the math stay easy to reason about
     independently."""
     with st.expander("Indicators", expanded=False):
-        st.caption("Overlays draw on the price chart itself; RSI/Stochastic RSI/MACD each get their own panel below it.")
+        st.caption("Overlays draw on the price chart itself; RSI/Stochastic RSI/MACD/ADX/ATR/CCI/Williams %R/MFI/ROC each get their own panel below it.")
         r1c1, r1c2, r1c3, r1c4 = st.columns(4)
         show_sma = r1c1.checkbox("SMA", key="mkt_show_sma")
         sma_period = r1c1.number_input("SMA period", 2, 200, 20, key="mkt_sma_period", label_visibility="collapsed")
@@ -230,10 +230,29 @@ def _render_indicator_controls() -> dict:
         stoch_period = r2c2.number_input("StochRSI period", 2, 100, 14, key="mkt_stoch_period", label_visibility="collapsed")
         show_macd = r2c3.checkbox("MACD", key="mkt_show_macd")
 
+        st.caption("Indian-market preset (Moneycontrol-style technicals):")
+        r3c1, r3c2, r3c3, r3c4 = st.columns(4)
+        show_adx = r3c1.checkbox("ADX", key="mkt_show_adx")
+        adx_period = r3c1.number_input("ADX period", 2, 100, 14, key="mkt_adx_period", label_visibility="collapsed")
+        show_atr = r3c2.checkbox("ATR", key="mkt_show_atr")
+        atr_period = r3c2.number_input("ATR period", 2, 100, 14, key="mkt_atr_period", label_visibility="collapsed")
+        show_cci = r3c3.checkbox("CCI", key="mkt_show_cci")
+        cci_period = r3c3.number_input("CCI period", 2, 100, 20, key="mkt_cci_period", label_visibility="collapsed")
+        show_willr = r3c4.checkbox("Williams %R", key="mkt_show_willr")
+        willr_period = r3c4.number_input("Williams %R period", 2, 100, 14, key="mkt_willr_period", label_visibility="collapsed")
+
+        r4c1, r4c2, _, _ = st.columns(4)
+        show_mfi = r4c1.checkbox("MFI", key="mkt_show_mfi")
+        mfi_period = r4c1.number_input("MFI period", 2, 100, 14, key="mkt_mfi_period", label_visibility="collapsed")
+        show_roc = r4c2.checkbox("ROC", key="mkt_show_roc")
+        roc_period = r4c2.number_input("ROC period", 2, 100, 20, key="mkt_roc_period", label_visibility="collapsed")
+
     return {
         "sma": (show_sma, sma_period), "ema": (show_ema, ema_period), "dma": (show_dma, dma_period),
         "bb": (show_bb, bb_period), "rsi": (show_rsi, rsi_period), "stoch": (show_stoch, stoch_period),
-        "macd": (show_macd, None),
+        "macd": (show_macd, None), "adx": (show_adx, adx_period), "atr": (show_atr, atr_period),
+        "cci": (show_cci, cci_period), "willr": (show_willr, willr_period), "mfi": (show_mfi, mfi_period),
+        "roc": (show_roc, roc_period),
     }
 
 
@@ -436,6 +455,24 @@ def _render_unified_chart(
     if show_macd:
         macd_line, signal_line, _hist_bars = ti.macd(hist["Close"])
         oscillators.append(("MACD", [(series_data(macd_line), ui_theme.NAVY_LIGHT, 2), (series_data(signal_line), ui_theme.WARN, 2)]))
+    show_adx, adx_period = indicators["adx"]
+    if show_adx:
+        oscillators.append(("ADX", [(series_data(ti.adx(hist["High"], hist["Low"], hist["Close"], adx_period)), ui_theme.CYAN, 2)]))
+    show_atr, atr_period = indicators["atr"]
+    if show_atr:
+        oscillators.append(("ATR", [(series_data(ti.atr(hist["High"], hist["Low"], hist["Close"], atr_period)), ui_theme.WARN, 2)]))
+    show_cci, cci_period = indicators["cci"]
+    if show_cci:
+        oscillators.append(("CCI", [(series_data(ti.cci(hist["High"], hist["Low"], hist["Close"], cci_period)), ui_theme.NAVY_LIGHT, 2)]))
+    show_willr, willr_period = indicators["willr"]
+    if show_willr:
+        oscillators.append(("Williams %R", [(series_data(ti.williams_r(hist["High"], hist["Low"], hist["Close"], willr_period)), ui_theme.BEAR, 2)]))
+    show_mfi, mfi_period = indicators["mfi"]
+    if show_mfi and "Volume" in hist.columns:
+        oscillators.append(("MFI", [(series_data(ti.mfi(hist["High"], hist["Low"], hist["Close"], hist["Volume"], mfi_period)), ui_theme.BULL, 2)]))
+    show_roc, roc_period = indicators["roc"]
+    if show_roc:
+        oscillators.append(("ROC", [(series_data(ti.roc(hist["Close"], roc_period)), ui_theme.CYAN, 2)]))
 
     candles_json = json.dumps(candles)
     volumes_json = json.dumps(volumes)

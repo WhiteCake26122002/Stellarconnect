@@ -45,3 +45,33 @@ def bollinger_bands(close: pd.Series, period: int = 20, std_dev: float = 2.0) ->
     """Returns (upper, middle, lower)."""
     indicator = ta.volatility.BollingerBands(close, window=period, window_dev=std_dev)
     return indicator.bollinger_hband(), indicator.bollinger_mavg(), indicator.bollinger_lband()
+
+
+def adx(high: pd.Series, low: pd.Series, close: pd.Series, period: int = 14) -> pd.Series:
+    """Average Directional Index - trend strength (not direction), 0-100."""
+    return ta.trend.ADXIndicator(high, low, close, window=period).adx()
+
+
+def atr(high: pd.Series, low: pd.Series, close: pd.Series, period: int = 14) -> pd.Series:
+    """Average True Range - absolute volatility, in the instrument's own price units."""
+    return ta.volatility.AverageTrueRange(high, low, close, window=period).average_true_range()
+
+
+def cci(high: pd.Series, low: pd.Series, close: pd.Series, period: int = 20) -> pd.Series:
+    """Commodity Channel Index - typical price deviation from its own moving average."""
+    return ta.trend.CCIIndicator(high, low, close, window=period).cci()
+
+
+def williams_r(high: pd.Series, low: pd.Series, close: pd.Series, period: int = 14) -> pd.Series:
+    """Williams %R - momentum extremes, -100 (oversold) to 0 (overbought)."""
+    return ta.momentum.WilliamsRIndicator(high, low, close, lbp=period).williams_r()
+
+
+def mfi(high: pd.Series, low: pd.Series, close: pd.Series, volume: pd.Series, period: int = 14) -> pd.Series:
+    """Money Flow Index - volume-weighted RSI, 0-100."""
+    return ta.volume.MFIIndicator(high, low, close, volume, window=period).money_flow_index()
+
+
+def roc(close: pd.Series, period: int = 20) -> pd.Series:
+    """Rate of Change - percentage price change over `period` bars."""
+    return ta.momentum.ROCIndicator(close, window=period).roc()
