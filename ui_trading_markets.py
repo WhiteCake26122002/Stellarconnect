@@ -22,11 +22,18 @@ from streamlit_lightweight_charts import renderLightweightCharts
 
 import ui_theme
 from backend.common.company_search import search_companies
+from backend.common.currency_format import format_per_share, format_scaled_money
 from backend.trading import store
 from backend.trading import technical_indicators as ti
 from backend.trading.index_constituents import INDEX_CSV_URLS, get_index_constituents
 from backend.trading.movers import MoverRow, get_movers
-from backend.trading.quotes import TIMEFRAME_PRESETS, get_live_quotes, get_ohlc_history
+from backend.trading.quotes import (
+    TIMEFRAME_PRESETS,
+    get_fx_rate_to_inr,
+    get_key_stats,
+    get_live_quotes,
+    get_ohlc_history,
+)
 
 INDEX_NAMES = list(INDEX_CSV_URLS.keys())
 DETAIL_AUTOREFRESH_MS = 25_000
@@ -381,6 +388,61 @@ def _render_order_toolbar(user_key: str, cash: float, ticker: str, live_price: f
     return held
 
 
+def _render_financials_panel(ticker: str) -> None:
+    """
+    A TradingView-style "Key facts" block - market cap, valuation ratios, 52-week range,
+    sector/industry, and a short business description - so researching a company doesn't mean
+    leaving Paper Trading for the DCF tool just to see what it actually does. Everything
+    money-shaped is converted to INR (via the same live FX rate quotes.py uses for orders),
+    consistent with the rest of this module always pricing in the wallet's own currency rather
+    than mixing $ and Rs. figures on the same page.
+    """
+    st.markdown('<div class="pt-section-label">Financials</div>', unsafe_allow_html=True)
+    stats = get_key_stats(ticker)
+    if not stats:
+        st.caption("Financial data is not available for this ticker right now.")
+        return
+
+    fx = get_fx_rate_to_inr(stats["currency"])
+
+    def _pct(v) -> str:
+        return f"{v:.2f}%" if v is not None else "n/a"
+
+    def _num(v) -> str:
+        return f"{v:,.2f}" if v is not None else "n/a"
+
+    def _inr_money(v) -> str:
+        return format_scaled_money((v * fx) / 1_000_000, "INR", symbol_override="Rs.") if v is not None else "n/a"
+
+    def _inr_per_share(v) -> str:
+        return format_per_share(v * fx, "INR", symbol_override="Rs.") if v is not None else "n/a"
+
+    facts = [
+        ("Market Cap", _inr_money(stats["market_cap"])),
+        ("P/E (TTM)", _num(stats["pe_trailing"])),
+        ("Forward P/E", _num(stats["pe_forward"])),
+        ("EPS (TTM)", _inr_per_share(stats["eps_trailing"])),
+        ("Dividend Yield", _pct(stats["dividend_yield"])),
+        ("Beta", _num(stats["beta"])),
+        ("52W High", _inr_per_share(stats["week52_high"])),
+        ("52W Low", _inr_per_share(stats["week52_low"])),
+        ("Avg Volume", _fmt_volume(stats["avg_volume"]) if stats["avg_volume"] else "n/a"),
+        ("Sector", stats["sector"] or "n/a"),
+        ("Industry", stats["industry"] or "n/a"),
+        ("Employees", f"{stats['employees']:,}" if stats["employees"] else "n/a"),
+    ]
+    st.markdown(ui_theme.key_facts_grid_html(facts), unsafe_allow_html=True)
+
+    if stats["summary"]:
+        summary = stats["summary"]
+        if len(summary) > 420:
+            summary = summary[:420].rsplit(" ", 1)[0] + "…"
+        st.write("")
+        st.caption(summary)
+    if stats["website"]:
+        st.markdown(f"[Visit website ↗]({stats['website']})")
+
+
 def render_stock_detail(user_key: str, cash: float, ticker: str) -> None:
     st_autorefresh(interval=DETAIL_AUTOREFRESH_MS, key="mkt_detail_autorefresh")
 
@@ -426,3 +488,6 @@ def render_stock_detail(user_key: str, cash: float, ticker: str) -> None:
         ", and the dashed line is your average cost." if held else "."
     )
     st.caption(f"Showing {period} of {interval} bars - Yahoo Finance's own maximum lookback at this resolution.{trade_note}")
+
+    st.divider()
+    _render_financials_panel(ticker)

@@ -30,6 +30,7 @@ FX_TTL_SECONDS = 300  # FX moves slowly enough that a 5-minute cache is plenty f
 PRICE_HISTORY_TTL_SECONDS = 6 * 3600
 PRICE_HISTORY_PERIOD = "2y"  # covers both the benchmark "what if" comparison since account
                              # creation and the ~1y window the beta regression uses
+KEY_STATS_TTL_SECONDS = 3600  # fundamentals (market cap, P/E, ...) move far slower than price - no need for the 20s quote TTL
 
 NIFTY_TICKER = "^NSEI"
 SENSEX_TICKER = "^BSESN"
@@ -144,6 +145,43 @@ def get_price_history(ticker: str, period: str = PRICE_HISTORY_PERIOD) -> list[t
         return [(idx.date(), float(close)) for idx, close in hist["Close"].items()]
     except Exception:
         return []
+
+
+@st.cache_data(ttl=KEY_STATS_TTL_SECONDS, show_spinner=False)
+def get_key_stats(ticker: str) -> dict | None:
+    """
+    A lightweight fundamentals snapshot for a stock detail page's Financials panel - market
+    cap, valuation ratios, 52-week range, sector, and a short business description - straight
+    from yfinance's `.info`. This is deliberately NOT the DCF engine's full 3-statement
+    ingestion (backend.ingestion.yfinance_ingestion.fetch_company): that path is far heavier
+    (income statement + balance sheet + cash flow, several seconds per call) and outright
+    refuses banks/insurers/NBFCs, which would make "view financials" on a random stock in
+    Paper Trading fail for an entire sector. `None` on lookup failure (unknown ticker, no
+    `.info` data) - callers should treat that as "financials unavailable", not a crash.
+    """
+    try:
+        info = yf.Ticker(ticker).info
+        if not info or info.get("quoteType") is None:
+            return None
+        return {
+            "currency": info.get("currency") or "USD",
+            "market_cap": info.get("marketCap"),
+            "pe_trailing": info.get("trailingPE"),
+            "pe_forward": info.get("forwardPE"),
+            "eps_trailing": info.get("trailingEps"),
+            "dividend_yield": info.get("dividendYield"),
+            "beta": info.get("beta"),
+            "week52_high": info.get("fiftyTwoWeekHigh"),
+            "week52_low": info.get("fiftyTwoWeekLow"),
+            "avg_volume": info.get("averageVolume"),
+            "sector": info.get("sector"),
+            "industry": info.get("industry"),
+            "employees": info.get("fullTimeEmployees"),
+            "website": info.get("website"),
+            "summary": info.get("longBusinessSummary"),
+        }
+    except Exception:
+        return None
 
 
 def resolve_company_name(ticker: str) -> str:

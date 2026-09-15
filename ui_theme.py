@@ -522,6 +522,13 @@ def inject_css() -> None:
         .src-price {{ font-family: 'IBM Plex Mono', monospace; font-weight: 700; color: {INK}; font-size: 0.88rem; }}
         .src-chg-row {{ margin-top: 2px; }}
 
+        /* ---- Key facts grid (stock detail Financials panel) -------------------- */
+        .fact-grid {{ display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 14px 18px; }}
+        .fact-tile {{ min-width: 0; }}
+        .fact-label {{ font-size: 0.7rem; color: {MUTED_2}; text-transform: uppercase; letter-spacing: 0.03em; }}
+        .fact-value {{ font-family: 'IBM Plex Mono', monospace; font-weight: 600; color: {INK}; font-size: 0.92rem;
+            margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }}
+
         /* ---- Cosmic component primitives (gravity well, orbit, cluster) -------- */
         @keyframes dcf-spin {{ to {{ transform: rotate(360deg); }} }}
         @keyframes dcf-breathe {{ 0%, 100% {{ opacity: .55; }} 50% {{ opacity: 1; }} }}
@@ -1071,6 +1078,20 @@ def search_result_row_html(
         <div class="src-price-block">{price_html}</div>
     </div>
     """)
+
+
+def key_facts_grid_html(facts: list[tuple[str, str]]) -> str:
+    """
+    A dense label/value stat grid - market cap, P/E, 52-week range, sector, ... - for a stock
+    detail page's Financials panel, modeled on TradingView's own symbol-page "Key facts" block
+    (label above, value below, muted/plain rather than the bigger kpi_card treatment which is
+    meant for a handful of headline numbers, not a dozen small ones side by side).
+    """
+    tiles = "".join(
+        f'<div class="fact-tile"><div class="fact-label">{label}</div><div class="fact-value">{value}</div></div>'
+        for label, value in facts
+    )
+    return _flatten_html(f'<div class="fact-grid">{tiles}</div>')
 
 
 def base_layout(fig, height: int = 340, **kwargs) -> None:

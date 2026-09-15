@@ -361,6 +361,62 @@ def _goto_chart(ticker: str, name: str) -> None:
     st.rerun()
 
 
+def _close_search_dialog() -> None:
+    st.session_state["pt_search_dialog_open"] = False
+
+
+@st.dialog("Search companies", width="large", on_dismiss=_close_search_dialog)
+def _search_dialog() -> None:
+    """
+    TradingView's own "Search (Ctrl+K)" pill, reimplemented as a modal reachable from every
+    tab (see _dashboard) instead of a search box buried inside just the Markets tab: type a
+    company, pick a result, land straight on its chart + financials - the same
+    search-to-navigate flow TradingView's own modal offers, distinct from the inline
+    search-and-trade box that already lives in the Markets tab for placing an order.
+
+    _dashboard() re-invokes this on every rerun for as long as
+    st.session_state["pt_search_dialog_open"] stays True (see there) rather than only on the
+    button click that first opened it: an @st.dialog only stays visually open through reruns
+    its OWN fragment causes (typing in this search box, e.g.) - a full outer-script rerun that
+    doesn't re-call this function closes it, and _dashboard()'s st_autorefresh fires one of
+    those every 20s, which would otherwise slam the dialog shut mid-search on any real use.
+    """
+    st.caption("Find any company to jump straight to its live chart and financials.")
+    query = st.text_input(
+        "Search", key="pt_dialog_query", placeholder="e.g. Reliance, TCS, Infosys, Apple",
+        label_visibility="collapsed",
+    )
+    query = query.strip()
+    if not query:
+        st.caption("Start typing a company name or ticker.")
+        return
+
+    matches = search_companies(query)
+    if not matches:
+        st.caption("No matches yet - keep typing, or try the exact ticker.")
+        return
+
+    quotes = get_live_quotes(tuple(m["symbol"] for m in matches))
+    for m in matches:
+        symbol = m["symbol"]
+        q = quotes.get(symbol)
+        with st.container(border=True):
+            row_col, action_col = st.columns([3, 1])
+            with row_col:
+                st.markdown(
+                    ui_theme.search_result_row_html(
+                        m["name"], symbol, m["exchange"],
+                        price=f"Rs. {q['price']:,.2f}" if q else None,
+                        change_pct=(q["change_pct"] * 100) if q else None,
+                    ),
+                    unsafe_allow_html=True,
+                )
+            with action_col:
+                if st.button("View", key=f"dlg_view_{symbol}", use_container_width=True, type="primary"):
+                    st.session_state["pt_search_dialog_open"] = False
+                    _goto_chart(symbol, m["name"])
+
+
 def _popular_stocks_row() -> None:
     st.markdown('<div class="pt-section-label"><span class="pt-live-dot"></span>Popular Stocks</div>', unsafe_allow_html=True)
     quotes = get_live_quotes(tuple(WATCHLIST_PREVIEW))
@@ -662,6 +718,13 @@ def _dashboard() -> None:
     user = store.get_or_create_user(user_key, display_name)
 
     _top_navbar(display_name)
+
+    search_col, _search_spacer = st.columns([1.6, 4])
+    with search_col:
+        if st.button("🔍  Search companies", key="pt_global_search_btn", use_container_width=True):
+            st.session_state["pt_search_dialog_open"] = True
+    if st.session_state.get("pt_search_dialog_open"):
+        _search_dialog()
 
     if user_key.startswith("guest:"):
         uid = user_key.removeprefix("guest:")
