@@ -461,10 +461,17 @@ def _render_drawing_chart(ticker: str, timeframe: str, hist: pd.DataFrame, trans
     above) so this app's own code can drive it directly and wire up real click-to-draw tools,
     working identically for every ticker since it's built on this app's own Yahoo Finance data.
 
-    Drawings live only in this component's own iframe, which Streamlit tears down and rebuilds
-    on every script rerun (this page's own 25s autorefresh included, same as the tradeable
-    chart above already does) - there's no channel back to Python to persist them, since
-    st.components.v1.html is one-way. Disclosed in the caption rather than hidden.
+    Streamlit tears this whole component's iframe down and rebuilds it fresh on every script
+    rerun (this page's own 25s autorefresh included, same as the tradeable chart above already
+    does), and st.components.v1.html has no channel back to Python - so a plain in-memory
+    drawings list would visibly vanish within seconds of drawing it, which is exactly what
+    shipped first and is not what "a drawing tool" should do. Fixed by persisting drawings in
+    localStorage (keyed per ticker+timeframe) instead of a JS variable: this iframe is loaded
+    via srcdoc with sandbox="allow-same-origin", which per spec makes its effective origin the
+    parent page's own origin, not an opaque one - confirmed in-browser (drawn, then forced a
+    rerun via an unrelated click, and it was still there) rather than assumed from the spec
+    alone. Every new drawing is saved immediately and the full set is replayed on load, so
+    drawings now survive reruns the same way the rest of this app's own state does.
     """
     time_col = "Date" if "Date" in hist.columns else "Datetime"
     is_intraday = timeframe not in ("1D", "1W", "1M")
@@ -519,6 +526,7 @@ def _render_drawing_chart(ticker: str, timeframe: str, hist: pd.DataFrame, trans
       const CANDLES = {candles_json};
       const TRADE_MARKERS = {trade_markers_json};
       const AVG_COST = {avg_cost_json};
+      const STORAGE_KEY = "pt_drawings::{container_id}";
       const container = document.getElementById("{container_id}");
       const chart = LightweightCharts.createChart(container, {{
         width: container.clientWidth, height: 460,
@@ -544,9 +552,41 @@ def _render_drawing_chart(ticker: str, timeframe: str, hist: pd.DataFrame, trans
         chart.applyOptions({{ width: entries[0].contentRect.width }});
       }}).observe(container);
 
+      // Persisted drawings: this component's own iframe is torn down and rebuilt fresh on
+      // every Streamlit rerun (the 25s autorefresh included), so a plain in-memory list would
+      // vanish within seconds. localStorage survives that - this iframe is loaded via srcdoc
+      // with allow-same-origin, so it shares the parent page's origin/storage rather than
+      // getting an opaque one.
+      let saved = [];
+      try {{ saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]"); }} catch (e) {{ saved = []; }}
+      let drawnSeries = [];
+
+      function persist() {{
+        try {{ localStorage.setItem(STORAGE_KEY, JSON.stringify(saved)); }} catch (e) {{ /* storage unavailable - drawing still works this session */ }}
+      }}
+
+      function paintTrendLine(p1, p2) {{
+        const line = chart.addLineSeries({{ color: "{ui_theme.NAVY_LIGHT}", lineWidth: 2 }});
+        line.setData([{{ time: p1.time, value: p1.price }}, {{ time: p2.time, value: p2.price }}]);
+        drawnSeries.push(line);
+      }}
+      function paintHLine(price) {{
+        const line = chart.addLineSeries({{ color: "{ui_theme.CYAN}", lineWidth: 1, lineStyle: 2 }});
+        line.setData([{{ time: CANDLES[0].time, value: price }}, {{ time: CANDLES[CANDLES.length - 1].time, value: price }}]);
+        drawnSeries.push(line);
+      }}
+      function paintText(time, text) {{
+        textMarkers.push({{ time, position: "aboveBar", color: "{ui_theme.WARN}", shape: "circle", text }});
+        refreshMarkers();
+      }}
+      for (const d of saved) {{
+        if (d.type === "trendline") paintTrendLine(d.p1, d.p2);
+        else if (d.type === "hline") paintHLine(d.price);
+        else if (d.type === "text") paintText(d.time, d.text);
+      }}
+
       let activeTool = "cursor";
       let pendingPoint = null;
-      let drawnSeries = [];
       const hints = {{
         cursor: "", trendline: "Click a start point, then an end point.",
         hline: "Click a price to draw a horizontal level.", text: "Click a point to add a text note.",
@@ -567,6 +607,8 @@ def _render_drawing_chart(ticker: str, timeframe: str, hist: pd.DataFrame, trans
         drawnSeries.forEach(s => chart.removeSeries(s));
         drawnSeries = [];
         textMarkers = [];
+        saved = [];
+        persist();
         refreshMarkers();
         pendingPoint = null;
       }});
@@ -581,20 +623,21 @@ def _render_drawing_chart(ticker: str, timeframe: str, hist: pd.DataFrame, trans
           if (!pendingPoint) {{
             pendingPoint = {{ time, price }};
           }} else {{
-            const line = chart.addLineSeries({{ color: "{ui_theme.NAVY_LIGHT}", lineWidth: 2 }});
-            line.setData([{{ time: pendingPoint.time, value: pendingPoint.price }}, {{ time, value: price }}]);
-            drawnSeries.push(line);
+            paintTrendLine(pendingPoint, {{ time, price }});
+            saved.push({{ type: "trendline", p1: pendingPoint, p2: {{ time, price }} }});
+            persist();
             pendingPoint = null;
           }}
         }} else if (activeTool === "hline") {{
-          const line = chart.addLineSeries({{ color: "{ui_theme.CYAN}", lineWidth: 1, lineStyle: 2 }});
-          line.setData([{{ time: CANDLES[0].time, value: price }}, {{ time: CANDLES[CANDLES.length - 1].time, value: price }}]);
-          drawnSeries.push(line);
+          paintHLine(price);
+          saved.push({{ type: "hline", price }});
+          persist();
         }} else if (activeTool === "text") {{
           const label = prompt("Annotation text:");
           if (label) {{
-            textMarkers.push({{ time, position: "aboveBar", color: "{ui_theme.WARN}", shape: "circle", text: label }});
-            refreshMarkers();
+            paintText(time, label);
+            saved.push({{ type: "text", time, text: label }});
+            persist();
           }}
         }}
       }});
@@ -602,9 +645,9 @@ def _render_drawing_chart(ticker: str, timeframe: str, hist: pd.DataFrame, trans
     """
     st.components.v1.html(widget_html, height=510, scrolling=False)
     st.caption(
-        "Drawn on this app's own live data, so it works the same for every stock. Drawings live only "
-        "in this chart and clear whenever the page reruns (switching tabs, the 25s auto-refresh, or "
-        "any other action on this page) - a limit of embedding this without a full custom component."
+        "Drawn on this app's own live data, so it works the same for every stock. Drawings are saved "
+        "per stock and timeframe in this browser, and stay put across refreshes and tab switches - "
+        "clearing the browser's site data (or a different browser/device) starts fresh."
     )
 
 
