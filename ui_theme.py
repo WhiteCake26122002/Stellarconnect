@@ -594,6 +594,38 @@ def inject_css() -> None:
             }}
             div.stButton > button:hover, div.stDownloadButton > button:hover {{ transform: none; }}
         }}
+
+        /* ---- Indicator picker popover + active-indicator chip row ----------------- */
+        [data-testid="stPopoverBody"] {{
+            background: {PANEL};
+            border: 1px solid {BORDER};
+        }}
+        .ind-pop-cat {{
+            font-size: 0.68rem;
+            font-weight: 600;
+            letter-spacing: 0.06em;
+            color: {MUTED_2};
+            text-transform: uppercase;
+            margin: 0.7rem 0 0.1rem 0;
+        }}
+        .ind-pop-row {{
+            font-size: 0.85rem;
+            color: {INK};
+            padding-top: 0.4rem;
+        }}
+        .st-key-mkt_indicator_chips [data-testid="stPopoverButton"] {{
+            background: {PANEL_RAISED};
+            border: 1px solid {BORDER};
+            border-radius: 999px;
+            padding: 0.15rem 0.9rem;
+            font-size: 0.78rem;
+            font-family: 'IBM Plex Mono', monospace;
+            color: {INK};
+        }}
+        .st-key-mkt_indicator_chips [data-testid="stPopoverButton"]:hover {{
+            border-color: {NAVY_LIGHT}88;
+            color: {NAVY_LIGHT};
+        }}
         </style>
         """,
         unsafe_allow_html=True,

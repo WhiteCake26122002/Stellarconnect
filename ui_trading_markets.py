@@ -206,54 +206,117 @@ def render_movers_tab(user_key: str, cash: float) -> None:
             _render_mover_row(row)
 
 
-def _render_indicator_controls() -> dict:
-    """A compact settings panel (checkboxes + period inputs) for every supported indicator.
-    Returns a plain dict of the current toggle/period state, read by the chart-building code
-    below - kept separate from it so the controls and the math stay easy to reason about
-    independently."""
-    with st.expander("Indicators", expanded=False):
-        st.caption("Overlays draw on the price chart itself; RSI/Stochastic RSI/MACD/ADX/ATR/CCI/Williams %R/MFI/ROC each get their own panel below it.")
-        r1c1, r1c2, r1c3, r1c4 = st.columns(4)
-        show_sma = r1c1.checkbox("SMA", key="mkt_show_sma")
-        sma_period = r1c1.number_input("SMA period", 2, 200, 20, key="mkt_sma_period", label_visibility="collapsed")
-        show_ema = r1c2.checkbox("EMA", key="mkt_show_ema")
-        ema_period = r1c2.number_input("EMA period", 2, 200, 20, key="mkt_ema_period", label_visibility="collapsed")
-        show_dma = r1c3.checkbox("DMA", key="mkt_show_dma")
-        dma_period = r1c3.number_input("DMA period", 2, 200, 20, key="mkt_dma_period", label_visibility="collapsed")
-        show_bb = r1c4.checkbox("Bollinger Bands", key="mkt_show_bb")
-        bb_period = r1c4.number_input("BB period", 2, 200, 20, key="mkt_bb_period", label_visibility="collapsed")
+# (id, label, category, default period - None for indicators with no single "length", like MACD)
+INDICATOR_CATALOG: list[tuple[str, str, str, int | None]] = [
+    ("sma", "SMA", "Trend", 20),
+    ("ema", "EMA", "Trend", 20),
+    ("dma", "DMA", "Trend", 20),
+    ("adx", "ADX", "Trend", 14),
+    ("rsi", "RSI", "Momentum", 14),
+    ("stoch", "Stochastic RSI", "Momentum", 14),
+    ("macd", "MACD", "Momentum", None),
+    ("cci", "CCI", "Momentum", 20),
+    ("willr", "Williams %R", "Momentum", 14),
+    ("roc", "ROC", "Momentum", 20),
+    ("bb", "Bollinger Bands", "Volatility", 20),
+    ("atr", "ATR", "Volatility", 14),
+    ("mfi", "MFI", "Volume", 14),
+]
+INDICATOR_CATEGORIES = ["Trend", "Momentum", "Volatility", "Volume"]
+_INDICATOR_BY_ID = {ind_id: (label, category, default_period) for ind_id, label, category, default_period in INDICATOR_CATALOG}
 
-        r2c1, r2c2, r2c3, _ = st.columns(4)
-        show_rsi = r2c1.checkbox("RSI", key="mkt_show_rsi")
-        rsi_period = r2c1.number_input("RSI period", 2, 100, 14, key="mkt_rsi_period", label_visibility="collapsed")
-        show_stoch = r2c2.checkbox("Stochastic RSI", key="mkt_show_stoch")
-        stoch_period = r2c2.number_input("StochRSI period", 2, 100, 14, key="mkt_stoch_period", label_visibility="collapsed")
-        show_macd = r2c3.checkbox("MACD", key="mkt_show_macd")
 
-        st.caption("Indian-market preset (Moneycontrol-style technicals):")
-        r3c1, r3c2, r3c3, r3c4 = st.columns(4)
-        show_adx = r3c1.checkbox("ADX", key="mkt_show_adx")
-        adx_period = r3c1.number_input("ADX period", 2, 100, 14, key="mkt_adx_period", label_visibility="collapsed")
-        show_atr = r3c2.checkbox("ATR", key="mkt_show_atr")
-        atr_period = r3c2.number_input("ATR period", 2, 100, 14, key="mkt_atr_period", label_visibility="collapsed")
-        show_cci = r3c3.checkbox("CCI", key="mkt_show_cci")
-        cci_period = r3c3.number_input("CCI period", 2, 100, 20, key="mkt_cci_period", label_visibility="collapsed")
-        show_willr = r3c4.checkbox("Williams %R", key="mkt_show_willr")
-        willr_period = r3c4.number_input("Williams %R period", 2, 100, 14, key="mkt_willr_period", label_visibility="collapsed")
+def _ind_state() -> dict:
+    """The session-wide {indicator_id: {"active", "visible", "period"}} store backing both the
+    Indicators picker and the active-indicator chip row below it. Deliberately plain
+    session_state (not widget-bound) - drawing state per-chart already lives in localStorage
+    through the drawing engine, but indicator choices are a lighter-weight, session-only
+    preference, same as the old checkbox panel this replaces."""
+    return st.session_state.setdefault("mkt_ind_state", {})
 
-        r4c1, r4c2, _, _ = st.columns(4)
-        show_mfi = r4c1.checkbox("MFI", key="mkt_show_mfi")
-        mfi_period = r4c1.number_input("MFI period", 2, 100, 14, key="mkt_mfi_period", label_visibility="collapsed")
-        show_roc = r4c2.checkbox("ROC", key="mkt_show_roc")
-        roc_period = r4c2.number_input("ROC period", 2, 100, 20, key="mkt_roc_period", label_visibility="collapsed")
 
-    return {
-        "sma": (show_sma, sma_period), "ema": (show_ema, ema_period), "dma": (show_dma, dma_period),
-        "bb": (show_bb, bb_period), "rsi": (show_rsi, rsi_period), "stoch": (show_stoch, stoch_period),
-        "macd": (show_macd, None), "adx": (show_adx, adx_period), "atr": (show_atr, atr_period),
-        "cci": (show_cci, cci_period), "willr": (show_willr, willr_period), "mfi": (show_mfi, mfi_period),
-        "roc": (show_roc, roc_period),
-    }
+def _ind_get(ind_id: str) -> dict:
+    _, _category, default_period = _INDICATOR_BY_ID[ind_id]
+    return _ind_state().setdefault(ind_id, {"active": False, "visible": True, "period": default_period})
+
+
+def _render_indicator_picker() -> None:
+    """The 'Indicators' header control: a searchable, categorized popover for adding indicators
+    to the chart - the TradingView-style indicator dropdown, scaled to this app's 13-indicator
+    catalog rather than the ~400-study version, per the agreed scope for this pass."""
+    with st.popover("📊 Indicators", use_container_width=False):
+        st.markdown('<div class="ind-pop-title">Add an indicator</div>', unsafe_allow_html=True)
+        query = st.text_input(
+            "Search indicators", key="mkt_ind_search", placeholder="Search indicators...",
+            label_visibility="collapsed",
+        )
+        q = query.strip().lower()
+        any_match = False
+        for category in INDICATOR_CATEGORIES:
+            items = [c for c in INDICATOR_CATALOG if c[2] == category and (not q or q in c[1].lower())]
+            if not items:
+                continue
+            any_match = True
+            st.markdown(f'<div class="ind-pop-cat">{category}</div>', unsafe_allow_html=True)
+            for ind_id, label, _category, _default_period in items:
+                state = _ind_get(ind_id)
+                row_c1, row_c2 = st.columns([4, 1])
+                row_c1.markdown(f'<div class="ind-pop-row">{label}</div>', unsafe_allow_html=True)
+                if row_c2.button(
+                    "✓" if state["active"] else "+",
+                    key=f"mkt_ind_add_{ind_id}", use_container_width=True,
+                    type="secondary" if state["active"] else "primary",
+                    help=f"Remove {label}" if state["active"] else f"Add {label}",
+                ):
+                    state["active"] = not state["active"]
+                    if state["active"]:
+                        state["visible"] = True
+        if not any_match:
+            st.caption("No indicators match your search.")
+
+
+def _chip_label(label: str, period: int | None, visible: bool) -> str:
+    text = f"{label} {period}" if period is not None else label
+    return f"🙈 {text}" if not visible else text
+
+
+def _render_active_indicator_chips() -> dict:
+    """The compact 'Active Indicators' row: one pill per added indicator, each opening a small
+    settings popover (period, visibility, remove) on click - merging the reference design's
+    separate indicator-chip row and Active Indicators manager into one control, since this
+    app's indicator count doesn't need both. Returns the {id: (show, period)} shape
+    _render_unified_chart already expects."""
+    resolved: dict[str, tuple[bool, int | None]] = {}
+    active: list[tuple[str, str, int | None]] = []
+    for ind_id, label, _category, _default_period in INDICATOR_CATALOG:
+        state = _ind_get(ind_id)
+        resolved[ind_id] = (state["active"] and state["visible"], state["period"])
+        if state["active"]:
+            active.append((ind_id, label, state["period"]))
+
+    if not active:
+        st.caption("No indicators added yet - click **📊 Indicators** above to add one.")
+        return resolved
+
+    with st.container(key="mkt_indicator_chips"):
+        cols = st.columns(len(active))
+        for col, (ind_id, label, _period) in zip(cols, active):
+            state = _ind_get(ind_id)
+            with col:
+                with st.popover(_chip_label(label, state["period"], state["visible"]), use_container_width=True):
+                    st.caption(f"{label} settings")
+                    if state["period"] is not None:
+                        state["period"] = st.number_input(
+                            "Period", min_value=2, max_value=200, value=int(state["period"]),
+                            key=f"mkt_ind_period_{ind_id}",
+                        )
+                    state["visible"] = st.checkbox(
+                        "Show on chart", value=state["visible"], key=f"mkt_ind_visible_{ind_id}",
+                    )
+                    if st.button("Remove indicator", key=f"mkt_ind_remove_{ind_id}", use_container_width=True):
+                        state["active"] = False
+                        st.rerun()
+    return resolved
 
 
 def _render_order_toolbar(user_key: str, cash: float, ticker: str, live_price: float | None):
@@ -1103,8 +1166,15 @@ def render_stock_detail(user_key: str, cash: float, ticker: str) -> None:
     held = _render_order_toolbar(user_key, cash, ticker, live_price)
 
     st.write("")
-    timeframe = st.selectbox("Timeframe", list(TIMEFRAME_PRESETS.keys()), index=4, key="mkt_timeframe")
-    indicators = _render_indicator_controls()
+    hc1, hc2, _hc3 = st.columns([1.1, 1.3, 3])
+    with hc1:
+        timeframe = st.selectbox(
+            "Timeframe", list(TIMEFRAME_PRESETS.keys()), index=4, key="mkt_timeframe",
+            label_visibility="collapsed",
+        )
+    with hc2:
+        _render_indicator_picker()
+    indicators = _render_active_indicator_chips()
 
     hist = get_ohlc_history(ticker, timeframe)
     if hist.empty:
