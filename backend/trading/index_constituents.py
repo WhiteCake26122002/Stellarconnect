@@ -21,11 +21,18 @@ _REQUEST_HEADERS = {"User-Agent": "Mozilla/5.0"}
 INDEX_CSV_URLS: dict[str, str] = {
     "Nifty 50": "https://niftyindices.com/IndexConstituent/ind_nifty50list.csv",
     "Nifty Next 50": "https://niftyindices.com/IndexConstituent/ind_niftynext50list.csv",
+    "Nifty Midcap 50": "https://niftyindices.com/IndexConstituent/ind_niftymidcap50list.csv",
+    "Nifty Midcap 100": "https://niftyindices.com/IndexConstituent/ind_niftymidcap100list.csv",
+    "Nifty Midcap 150": "https://niftyindices.com/IndexConstituent/ind_niftymidcap150list.csv",
+    "Nifty LargeMidcap 250": "https://niftyindices.com/IndexConstituent/ind_niftylargemidcap250list.csv",
+    "Nifty Smallcap 50": "https://niftyindices.com/IndexConstituent/ind_niftysmallcap50list.csv",
+    "Nifty Smallcap 100": "https://niftyindices.com/IndexConstituent/ind_niftysmallcap100list.csv",
+    "Nifty Smallcap 250": "https://niftyindices.com/IndexConstituent/ind_niftysmallcap250list.csv",
+    "Nifty MidSmallcap 400": "https://niftyindices.com/IndexConstituent/ind_niftymidsmallcap400list.csv",
+    "Nifty 500": "https://niftyindices.com/IndexConstituent/ind_nifty500list.csv",
+    "Nifty Total Market": "https://niftyindices.com/IndexConstituent/ind_niftytotalmarket_list.csv",
     "Nifty Bank": "https://niftyindices.com/IndexConstituent/ind_niftybanklist.csv",
     "Nifty IT": "https://niftyindices.com/IndexConstituent/ind_niftyitlist.csv",
-    "Nifty 500": "https://niftyindices.com/IndexConstituent/ind_nifty500list.csv",
-    "Nifty Midcap 150": "https://niftyindices.com/IndexConstituent/ind_niftymidcap150list.csv",
-    "Nifty Smallcap 250": "https://niftyindices.com/IndexConstituent/ind_niftysmallcap250list.csv",
 }
 
 
