@@ -555,24 +555,31 @@ def _render_unified_chart(
       body {{ margin: 0; font-family: 'IBM Plex Sans', -apple-system, sans-serif; }}
       .dtool-bar {{ display: flex; gap: 6px; padding: 6px 0 10px; flex-wrap: wrap; align-items: center; }}
       .dtool-select, .dtool-btn {{ background: {ui_theme.PANEL_RAISED}; color: {ui_theme.MUTED}; border: 1px solid {ui_theme.BORDER};
-        border-radius: 6px; padding: 6px 10px; font-size: 0.78rem; cursor: pointer; font-family: inherit; }}
-      .dtool-btn:hover {{ color: {ui_theme.INK}; }}
-      .dtool-btn:disabled {{ opacity: 0.4; cursor: default; }}
+        border-radius: 6px; padding: 6px 10px; font-size: 0.78rem; cursor: pointer; font-family: inherit;
+        transition: color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease; }}
+      .dtool-select:hover, .dtool-btn:hover {{ color: {ui_theme.INK}; border-color: {ui_theme.NAVY_LIGHT}88;
+        box-shadow: 0 0 0 1px {ui_theme.NAVY_LIGHT}33; }}
+      .dtool-select:focus-visible, .dtool-btn:focus-visible {{ outline: none; border-color: {ui_theme.NAVY_LIGHT};
+        box-shadow: 0 0 0 3px {ui_theme.NAVY_LIGHT}33; }}
+      .dtool-btn:disabled {{ opacity: 0.4; cursor: default; box-shadow: none; }}
       .dtool-hint {{ color: {ui_theme.MUTED_2}; font-size: 0.72rem; padding-left: 4px; }}
       .osc-label {{ font-size: 0.72rem; color: {ui_theme.MUTED_2}; margin: 8px 0 2px; }}
       .chart-row {{ display: flex; gap: 10px; align-items: flex-start; }}
       .chart-col {{ flex: 1; min-width: 0; }}
       .dlist-panel {{ width: 190px; flex-shrink: 0; background: {ui_theme.PANEL_RAISED}; border: 1px solid {ui_theme.BORDER};
-        border-radius: 8px; padding: 8px; max-height: 460px; overflow-y: auto; box-sizing: border-box; }}
+        border-radius: 8px; padding: 8px; max-height: 460px; overflow-y: auto; box-sizing: border-box;
+        box-shadow: 0 8px 22px -10px #00000088; }}
       .dlist-header {{ font-size: 0.7rem; color: {ui_theme.MUTED_2}; text-transform: uppercase; letter-spacing: 0.03em; margin-bottom: 6px; }}
       .dlist-empty {{ font-size: 0.75rem; color: {ui_theme.MUTED_2}; }}
-      .dlist-row {{ display: flex; align-items: center; gap: 2px; padding: 5px 4px; border-radius: 5px; cursor: pointer; }}
+      .dlist-row {{ display: flex; align-items: center; gap: 2px; padding: 5px 4px; border-radius: 5px; cursor: pointer;
+        transition: background-color 0.15s ease, box-shadow 0.15s ease; }}
       .dlist-row:hover {{ background: {ui_theme.PANEL}; }}
-      .dlist-row.selected {{ background: {ui_theme.NAVY_LIGHT}22; }}
+      .dlist-row.selected {{ background: {ui_theme.NAVY_LIGHT}22; box-shadow: inset 0 0 0 1px {ui_theme.NAVY_LIGHT}55; }}
       .dlist-row.hidden-row .dlist-label {{ opacity: 0.45; }}
       .dlist-label {{ flex: 1; min-width: 0; font-size: 0.75rem; color: {ui_theme.INK}; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }}
-      .dlist-icon {{ background: none; border: none; color: {ui_theme.MUTED}; cursor: pointer; font-size: 0.75rem; padding: 2px 3px; border-radius: 4px; line-height: 1; }}
-      .dlist-icon:hover {{ background: {ui_theme.BORDER}; }}
+      .dlist-icon {{ background: none; border: none; color: {ui_theme.MUTED}; cursor: pointer; font-size: 0.75rem; padding: 2px 3px; border-radius: 4px;
+        line-height: 1; transition: background-color 0.15s ease, color 0.15s ease; }}
+      .dlist-icon:hover {{ background: {ui_theme.BORDER}; color: {ui_theme.INK}; }}
     </style>
     <div class="dtool-bar">
       <select class="dtool-select" id="tool-select">

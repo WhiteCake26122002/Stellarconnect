@@ -123,7 +123,12 @@ def _css() -> None:
         .pt-logo-row .pt-logo {{ margin:0; }}
 
         /* ---- Trading-floor top bar ---------------------------------------- */
-        .pt-navbar {{ border-bottom:1px solid {ui_theme.BORDER}; padding:6px 4px 14px; margin-bottom:20px; }}
+        /* A soft violet-to-transparent glow line instead of a flat rule - the same
+           "event horizon edge" language the rest of the cosmic system already uses
+           (orbit rings, mode-selector bodies), just applied to the terminal's own top bar. */
+        .pt-navbar {{ position:relative; padding:6px 4px 14px; margin-bottom:20px; }}
+        .pt-navbar::after {{ content:''; position:absolute; left:0; right:0; bottom:0; height:1px;
+            background:linear-gradient(90deg, {ui_theme.NAVY_LIGHT}55, {ui_theme.BORDER} 40%, {ui_theme.BORDER} 60%, {ui_theme.CYAN}44); }}
         .pt-navbar-row {{ display:flex; align-items:center; justify-content:space-between; gap:16px; flex-wrap:wrap; }}
         .pt-navbar-left {{ display:flex; gap:26px; flex-wrap:wrap; }}
         .pt-index {{ display:flex; flex-direction:column; line-height:1.3; }}
@@ -134,7 +139,8 @@ def _css() -> None:
         .pt-index-chg.down {{ color:{ui_theme.BEAR}; }}
         .pt-navbar-brand {{ font-weight:800; font-size:1.15rem; color:{ui_theme.INK}; }}
         .pt-avatar {{ width:36px; height:36px; border-radius:50%; background:{ui_theme.NAVY_LIGHT}; color:{ui_theme.INK};
-                      display:flex; align-items:center; justify-content:center; font-weight:700; font-size:0.8rem; flex-shrink:0; }}
+                      display:flex; align-items:center; justify-content:center; font-weight:700; font-size:0.8rem; flex-shrink:0;
+                      box-shadow:0 0 0 1px {ui_theme.NAVY_LIGHT}33, 0 0 14px -2px {ui_theme.NAVY_LIGHT}88; }}
 
         /* Sectoral indices row: smaller pills, horizontally scrollable so a narrow screen doesn't
            force multi-line wrapping mid-pill. */

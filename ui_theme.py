@@ -599,6 +599,10 @@ def inject_css() -> None:
         [data-testid="stPopoverBody"] {{
             background: {PANEL};
             border: 1px solid {BORDER};
+            box-shadow: 0 14px 34px -12px #000000aa, 0 0 0 1px {NAVY_LIGHT}14;
+        }}
+        [data-testid="stPopoverButton"] {{
+            transition: border-color 0.15s ease, box-shadow 0.15s ease, color 0.15s ease;
         }}
         .ind-pop-cat {{
             font-size: 0.68rem;
@@ -613,6 +617,12 @@ def inject_css() -> None:
             color: {INK};
             padding-top: 0.4rem;
         }}
+        /* The +/Add buttons in the indicator picker rows get the same brand hover-glow as
+           every other primary control, instead of Streamlit's default flat hover. */
+        [data-testid="stPopoverBody"] div.stButton > button:hover {{
+            border-color: {NAVY_LIGHT}aa;
+            box-shadow: 0 0 0 2px {NAVY_LIGHT}2E;
+        }}
         .st-key-mkt_indicator_chips [data-testid="stPopoverButton"] {{
             background: {PANEL_RAISED};
             border: 1px solid {BORDER};
@@ -625,6 +635,7 @@ def inject_css() -> None:
         .st-key-mkt_indicator_chips [data-testid="stPopoverButton"]:hover {{
             border-color: {NAVY_LIGHT}88;
             color: {NAVY_LIGHT};
+            box-shadow: 0 0 12px -3px {NAVY_LIGHT}77;
         }}
         </style>
         """,
