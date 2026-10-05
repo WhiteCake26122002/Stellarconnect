@@ -1,0 +1,34 @@
+import { expect, test } from "@playwright/test";
+import { registerAccount, skipFirstRunTour } from "./helpers";
+
+test("register, sample model, verdict, override", async ({ page }) => {
+  await registerAccount(page, { first: "E2E", last: "Analyst" });
+  await page.getByRole("link", { name: "Open DCF" }).click();
+  await expect(page.getByRole("heading", { name: "Models", exact: true })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Paper trading" })).toBeVisible();
+  await page.getByRole("link", { name: "New model" }).click();
+  await page.getByRole("button", { name: "Open sample model" }).click();
+  await expect(page.getByRole("heading", { name: /Orion Cloud Systems/ })).toBeVisible({ timeout: 30000 });
+  await skipFirstRunTour(page);
+  await expect(page.getByText("DCF Base Case")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Refresh statements" })).toHaveCount(0);
+  await expect(page.getByRole("img", { name: /Historical vs forecast revenue/i })).toBeVisible();
+  await page.getByRole("tab", { name: "Financials" }).click();
+  const book = page.locator(".table-wrap table");
+  await expect(page.getByRole("heading", { name: /Income statement/ })).toBeVisible();
+  await expect(book.getByText("FY21")).toBeVisible();
+  await expect(book.getByText("FY26")).toBeVisible();
+  await expect(book.getByRole("cell", { name: "Revenue" })).toBeVisible();
+  await expect(book.getByRole("cell", { name: "520", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Balance sheet" }).click();
+  await expect(page.getByRole("heading", { name: /Balance sheet/ })).toBeVisible();
+  await expect(book.getByRole("cell", { name: "Cash" })).toBeVisible();
+  await page.getByRole("button", { name: "Cash flow" }).click();
+  await expect(page.getByRole("heading", { name: /Cash flow/ })).toBeVisible();
+  await page.getByRole("tab", { name: "Forecast" }).click();
+  await expect(page.getByRole("heading", { name: "FCFF / DCF" })).toBeVisible();
+  await page.getByRole("tab", { name: "DCF" }).click();
+  await expect(page.getByRole("heading", { name: /Unlevered Free Cash Flow/i })).toBeVisible();
+  await page.getByRole("tab", { name: "Sensitivity" }).click();
+  await expect(page.getByRole("heading", { name: /WACC vs. Terminal Growth/i })).toBeVisible();
+});

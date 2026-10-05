@@ -4,8 +4,15 @@ __pycache__/
 venv/
 .pytest_cache/
 
-# Generated exports (created at runtime via tempfile; never committed)
-output/
+# Local API database (SQLite fallback)
+backend/data/*.db
+
+# Frontend
+frontend/node_modules/
+frontend/.next/
+frontend/test-results/
+frontend/playwright-report/
+frontend/*.tsbuildinfo
 
 # Paper-trading SQLite database (runtime state, resets on every deploy anyway)
 backend/trading/trading.db
@@ -13,10 +20,14 @@ backend/trading/trading.db
 # Local tooling / editor
 .claude/
 .vscode/
+.tmp-frames/
 
 # OS
 .DS_Store
 Thumbs.db
 
-# Secrets - never commit Streamlit secrets
+# Secrets - never commit Streamlit secrets or local env
 .streamlit/secrets.toml
+.env
+.env.local
+.env.*.local
