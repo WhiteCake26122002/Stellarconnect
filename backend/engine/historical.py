@@ -7,6 +7,8 @@ basis every forecast assumption must cite (spec section 5).
 """
 from __future__ import annotations
 
+from statistics import pstdev
+
 from pydantic import BaseModel
 
 from .models import HistoricalFinancials
@@ -30,17 +32,32 @@ class YearMetrics(BaseModel):
 
 class HistoricalSummary(BaseModel):
     years: list[YearMetrics]
+    revenue_cagr_2y: float | None
     revenue_cagr_3y: float | None
     revenue_cagr_5y: float | None
+    revenue_cagr_7y: float | None
+    last_1y_growth: float | None
+    median_annual_growth: float | None
+    mean_annual_growth: float | None
+    growth_volatility: float | None
+    min_annual_growth: float | None
+    max_annual_growth: float | None
     avg_gross_margin: float
     avg_ebitda_margin: float
     avg_ebit_margin: float
     median_ebitda_margin: float
+    median_ebitda_margin_3y: float
+    median_ebit_margin_3y: float
     avg_tax_rate: float
     avg_capex_pct_revenue: float
     avg_da_pct_revenue: float
     avg_nwc_pct_revenue: float
+    median_capex_pct_3y: float
     recent_2y_avg_growth: float | None
+    nwc_method: str = "balance_sheet"
+    nwc_delta_pct_of_delta_revenue: float | None = None
+    cash_reported: bool = True
+    operating_wc_complete: bool = True
     trend_commentary: list[str]
 
 
@@ -96,25 +113,53 @@ def analyze_historicals(hist: HistoricalFinancials) -> HistoricalSummary:
             )
         )
 
+    revenue_cagr_2y = (
+        cagr(hist.income_statements[-3].revenue, hist.income_statements[-1].revenue, 2) if n >= 3 else None
+    )
     revenue_cagr_3y = (
         cagr(hist.income_statements[-4].revenue, hist.income_statements[-1].revenue, 3) if n >= 4 else None
     )
     revenue_cagr_5y = (
         cagr(hist.income_statements[-6].revenue, hist.income_statements[-1].revenue, 5) if n >= 6 else None
     )
+    revenue_cagr_7y = (
+        cagr(hist.income_statements[-8].revenue, hist.income_statements[-1].revenue, 7) if n >= 8 else None
+    )
 
     growth_values = [y.revenue_growth for y in years if y.revenue_growth is not None]
     recent_2y = growth_values[-2:] if len(growth_values) >= 2 else growth_values
     recent_2y_avg = sum(recent_2y) / len(recent_2y) if recent_2y else None
+    last_1y = growth_values[-1] if growth_values else None
+    median_annual = _median(growth_values) if growth_values else None
+    mean_annual = (sum(growth_values) / len(growth_values)) if growth_values else None
+    growth_vol = pstdev(growth_values) if len(growth_values) >= 2 else (0.0 if growth_values else None)
 
     avg_gross = sum(y.gross_margin for y in years) / n
     avg_ebitda = sum(y.ebitda_margin for y in years) / n
     avg_ebit = sum(y.ebit_margin for y in years) / n
     med_ebitda = _median([y.ebitda_margin for y in years])
+    last3 = years[-3:] if n >= 3 else years
+    med_ebitda_3y = _median([y.ebitda_margin for y in last3])
+    med_ebit_3y = _median([y.ebit_margin for y in last3])
     avg_tax = sum(y.tax_rate for y in years) / n
     avg_capex = sum(y.capex_pct_revenue for y in years) / n
     avg_da = sum(y.da_pct_revenue for y in years) / n
     avg_nwc = sum(y.nwc_pct_revenue for y in years) / n
+    med_capex_3y = _median([y.capex_pct_revenue for y in last3])
+
+    operating_wc_complete = all(bs.operating_wc_complete for bs in hist.balance_sheets)
+    cash_reported = hist.balance_sheets[-1].cash_reported
+    nwc_method = "balance_sheet" if operating_wc_complete else "cash_flow_derived"
+    nwc_delta_ratio: float | None = None
+    if not operating_wc_complete:
+        ratios: list[float] = []
+        for i in range(1, n):
+            d_rev = hist.income_statements[i].revenue - hist.income_statements[i - 1].revenue
+            if abs(d_rev) < 1e-9:
+                continue
+            ratios.append(hist.cash_flows[i].change_in_nwc / d_rev)
+        nwc_delta_ratio = _median(ratios) if ratios else None
+        avg_nwc = 0.0
 
     commentary: list[str] = []
     if revenue_cagr_5y is not None and recent_2y_avg is not None:
@@ -136,16 +181,31 @@ def analyze_historicals(hist: HistoricalFinancials) -> HistoricalSummary:
 
     return HistoricalSummary(
         years=years,
+        revenue_cagr_2y=revenue_cagr_2y,
         revenue_cagr_3y=revenue_cagr_3y,
         revenue_cagr_5y=revenue_cagr_5y,
+        revenue_cagr_7y=revenue_cagr_7y,
+        last_1y_growth=last_1y,
+        median_annual_growth=median_annual,
+        mean_annual_growth=mean_annual,
+        growth_volatility=growth_vol,
+        min_annual_growth=min(growth_values) if growth_values else None,
+        max_annual_growth=max(growth_values) if growth_values else None,
         avg_gross_margin=avg_gross,
         avg_ebitda_margin=avg_ebitda,
         avg_ebit_margin=avg_ebit,
         median_ebitda_margin=med_ebitda,
+        median_ebitda_margin_3y=med_ebitda_3y,
+        median_ebit_margin_3y=med_ebit_3y,
         avg_tax_rate=avg_tax,
         avg_capex_pct_revenue=avg_capex,
         avg_da_pct_revenue=avg_da,
         avg_nwc_pct_revenue=avg_nwc,
+        median_capex_pct_3y=med_capex_3y,
         recent_2y_avg_growth=recent_2y_avg,
+        nwc_method=nwc_method,
+        nwc_delta_pct_of_delta_revenue=nwc_delta_ratio,
+        cash_reported=cash_reported,
+        operating_wc_complete=operating_wc_complete,
         trend_commentary=commentary,
     )

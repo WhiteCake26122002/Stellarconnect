@@ -7,7 +7,12 @@ of bug immediately instead of it surfacing as "corporate_tax_rate=None".
 """
 import pytest
 
-from ..data.damodaran_reference import get_country_risk, match_india_sector_beta
+from ..data.damodaran_reference import (
+    GrowthDataUnavailable,
+    get_country_risk,
+    match_india_sector_beta,
+    match_india_sector_growth,
+)
 
 
 def test_mature_market_erp_is_a_real_percentage_not_nan():
@@ -71,3 +76,45 @@ def test_unlevered_beta_below_levered_beta_when_debt_present():
     assert m.d_e_ratio >= 0
     if m.d_e_ratio > 0:
         assert m.unlevered_beta <= m.levered_beta
+
+
+def test_sector_growth_alias_resolves_to_a_real_number():
+    m = match_india_sector_growth("Information Technology Services")
+    assert m.matched_industry == "Computer Services"
+    assert m.match_score == 100.0
+    assert m.low_confidence is False
+    assert isinstance(m.expected_growth, float)
+    assert -0.5 < m.expected_growth < 1.5
+
+
+def test_screener_it_services_label_does_not_fuzzy_to_software_products():
+    """Screener.in reports TCS/Infosys as this label; fuzzy-only matching
+    previously accepted Software (System & Application) at 56%."""
+    m = match_india_sector_growth("Computers - Software & Consulting")
+    assert m.matched_industry == "Computer Services"
+    assert m.low_confidence is False
+
+
+def test_sector_growth_fuzzy_match_uses_workbook_row():
+    m = match_india_sector_growth("Computer Services")
+    assert m.matched_industry == "Computer Services"
+    assert m.low_confidence is False
+    assert -0.5 < m.expected_growth < 1.5
+
+
+def test_unmatched_industry_growth_falls_back_to_total_market():
+    m = match_india_sector_growth("Complete Nonsense Sector That Does Not Exist Anywhere")
+    assert m.matched_industry == "Total Market"
+    assert m.low_confidence is True
+    assert m.match_score == 0.0
+    assert -0.5 < m.expected_growth < 1.5
+
+
+def test_missing_growth_workbook_raises_growth_data_unavailable(monkeypatch, tmp_path):
+    from ..data import damodaran_reference as mod
+
+    mod._load_india_growth.cache_clear()
+    monkeypatch.setattr(mod, "REFERENCE_DIR", tmp_path)
+    with pytest.raises(GrowthDataUnavailable):
+        match_india_sector_growth("Steel")
+    mod._load_india_growth.cache_clear()

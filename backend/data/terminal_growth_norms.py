@@ -24,3 +24,27 @@ def terminal_growth_norms(currency: str) -> tuple[float, float]:
     if code in DEVELOPED_CURRENCIES:
         return DEVELOPED_DEFAULT, DEVELOPED_CEILING
     return EMERGING_DEFAULT, EMERGING_CEILING
+
+
+def terminal_growth_for_company(currency: str, regime: str = "moderate") -> tuple[float, float, str]:
+    """Returns (g, ceiling, rationale). Last explicit year must fade to this g."""
+    default, ceiling = terminal_growth_norms(currency)
+    code = (currency or "USD").upper()
+    market = (
+        "developed-market nominal GDP proxy"
+        if code in DEVELOPED_CURRENCIES
+        else "emerging-market nominal GDP proxy"
+    )
+    if regime == "declining":
+        g = min(default, 0.020 if code in DEVELOPED_CURRENCIES else 0.030)
+        rationale = (
+            f"Declining historical regime: terminal growth is {g:.1%}, the lower of the {market} "
+            f"({default:.1%}) and a no-growth-plus-inflation floor. This is not a bounce-back to a "
+            "generic 4% emerging-market rate."
+        )
+        return g, ceiling, rationale
+    rationale = (
+        f"Terminal growth is {default:.1%}, the {market} for {code}. Near-term company growth is "
+        "not used in perpetuity. Competitive fade is assumed complete by the last explicit year."
+    )
+    return default, ceiling, rationale

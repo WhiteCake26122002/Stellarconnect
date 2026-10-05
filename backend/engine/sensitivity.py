@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel
 
-from .assumption_utils import shift_assumption
+from .assumption_utils import pin_last_growth, shift_assumption
 from .forecast import ForecastAssumptions, project_financials
 from .models import Company, HistoricalFinancials
 from .valuation import DCFValuationResult, run_dcf_valuation
@@ -26,6 +26,7 @@ class ValuationContext(BaseModel):
     total_debt: float
     lease_liabilities: float
     exit_multiple: float | None = None
+    non_operating_investments: float = 0.0
 
 
 def _revalue(
@@ -46,6 +47,7 @@ def _revalue(
         total_debt=ctx.total_debt,
         lease_liabilities=ctx.lease_liabilities,
         exit_multiple=ctx.exit_multiple,
+        non_operating_investments=ctx.non_operating_investments,
     )
 
 
@@ -95,6 +97,7 @@ def wacc_vs_growth_table(
                 total_debt=ctx.total_debt,
                 lease_liabilities=ctx.lease_liabilities,
                 exit_multiple=ctx.exit_multiple,
+                non_operating_investments=ctx.non_operating_investments,
             )
             cells.append(
                 SensitivityCell(
@@ -105,6 +108,21 @@ def wacc_vs_growth_table(
                 )
             )
     return WaccGrowthTable(wacc_range=wacc_range, growth_range=growth_range, cells=cells)
+
+
+class TwoWayCell(BaseModel):
+    row: float
+    col: float
+    enterprise_value: float
+    equity_value_per_share: float | None
+
+
+class TwoWayTable(BaseModel):
+    row_name: str
+    col_name: str
+    row_range: list[float]
+    col_range: list[float]
+    cells: list[TwoWayCell]
 
 
 class OneDimSensitivityPoint(BaseModel):
@@ -133,6 +151,11 @@ def revenue_growth_sensitivity(
     for shift in shifts:
         shifted = base_assumptions.model_copy(deep=True)
         shifted.revenue_growth = [shift_assumption(a, shift, "Sensitivity") for a in shifted.revenue_growth]
+        pin_last_growth(
+            shifted.revenue_growth,
+            terminal_growth,
+            "Sensitivity: last explicit year stays at Gordon g.",
+        )
         result = _revalue(hist, shifted, wacc_result, terminal_growth, company, ctx)
         points.append(
             OneDimSensitivityPoint(
@@ -142,7 +165,7 @@ def revenue_growth_sensitivity(
             )
         )
     return OneDimSensitivity(
-        driver_name="Revenue Growth (all forecast years)",
+        driver_name="Revenue Growth (explicit years, last year = g)",
         points=points,
         base_enterprise_value=base_result.enterprise_value,
     )
@@ -190,6 +213,7 @@ def wacc_sensitivity(
             total_debt=ctx.total_debt,
             lease_liabilities=ctx.lease_liabilities,
             exit_multiple=ctx.exit_multiple,
+            non_operating_investments=ctx.non_operating_investments,
         )
         points.append(
             OneDimSensitivityPoint(
@@ -221,6 +245,148 @@ def capex_sensitivity(
         )
     return OneDimSensitivity(
         driver_name="Capex % of Revenue", points=points, base_enterprise_value=base_result.enterprise_value
+    )
+
+
+def growth_vs_margin_table(
+    hist: HistoricalFinancials,
+    assumptions: ForecastAssumptions,
+    wacc_result: WaccResult,
+    terminal_growth: float,
+    company: Company,
+    ctx: ValuationContext,
+    growth_shifts: list[float],
+    margin_shifts: list[float],
+) -> TwoWayTable:
+    cells: list[TwoWayCell] = []
+    for dg in growth_shifts:
+        shifted_g = assumptions.model_copy(deep=True)
+        shifted_g.revenue_growth = [shift_assumption(a, dg, "Sensitivity") for a in shifted_g.revenue_growth]
+        pin_last_growth(
+            shifted_g.revenue_growth,
+            terminal_growth,
+            "Sensitivity: last explicit year stays at Gordon g.",
+        )
+        for dm in margin_shifts:
+            shifted = shifted_g.model_copy(deep=True)
+            per_line = -dm / 3
+            shifted.rnd_pct_revenue = [shift_assumption(a, per_line, "Sensitivity") for a in shifted.rnd_pct_revenue]
+            shifted.sm_pct_revenue = [shift_assumption(a, per_line, "Sensitivity") for a in shifted.sm_pct_revenue]
+            shifted.ga_pct_revenue = [shift_assumption(a, per_line, "Sensitivity") for a in shifted.ga_pct_revenue]
+            result = _revalue(hist, shifted, wacc_result, terminal_growth, company, ctx)
+            cells.append(
+                TwoWayCell(
+                    row=dg,
+                    col=dm,
+                    enterprise_value=result.enterprise_value,
+                    equity_value_per_share=result.equity_bridge.equity_value_per_share,
+                )
+            )
+    return TwoWayTable(
+        row_name="Revenue growth shift (explicit years)",
+        col_name="EBIT / EBITDA margin shift",
+        row_range=list(growth_shifts),
+        col_range=list(margin_shifts),
+        cells=cells,
+    )
+
+
+def growth_vs_wacc_table(
+    hist: HistoricalFinancials,
+    assumptions: ForecastAssumptions,
+    base_wacc_result: WaccResult,
+    terminal_growth: float,
+    company: Company,
+    ctx: ValuationContext,
+    growth_shifts: list[float],
+    wacc_range: list[float],
+) -> TwoWayTable:
+    cells: list[TwoWayCell] = []
+    for dg in growth_shifts:
+        shifted = assumptions.model_copy(deep=True)
+        shifted.revenue_growth = [shift_assumption(a, dg, "Sensitivity") for a in shifted.revenue_growth]
+        pin_last_growth(
+            shifted.revenue_growth,
+            terminal_growth,
+            "Sensitivity: last explicit year stays at Gordon g.",
+        )
+        forecast = project_financials(hist, shifted)
+        for w in wacc_range:
+            if w <= terminal_growth:
+                cells.append(
+                    TwoWayCell(row=dg, col=w, enterprise_value=float("nan"), equity_value_per_share=None)
+                )
+                continue
+            wacc_copy = base_wacc_result.model_copy()
+            wacc_copy.wacc = w
+            result = run_dcf_valuation(
+                forecast=forecast,
+                wacc_result=wacc_copy,
+                terminal_growth=terminal_growth,
+                company=company,
+                cash_and_investments=ctx.cash_and_investments,
+                total_debt=ctx.total_debt,
+                lease_liabilities=ctx.lease_liabilities,
+                exit_multiple=ctx.exit_multiple,
+                non_operating_investments=ctx.non_operating_investments,
+            )
+            cells.append(
+                TwoWayCell(
+                    row=dg,
+                    col=w,
+                    enterprise_value=result.enterprise_value,
+                    equity_value_per_share=result.equity_bridge.equity_value_per_share,
+                )
+            )
+    return TwoWayTable(
+        row_name="Revenue growth shift (explicit years)",
+        col_name="WACC",
+        row_range=list(growth_shifts),
+        col_range=list(wacc_range),
+        cells=cells,
+    )
+
+
+def growth_vs_capex_table(
+    hist: HistoricalFinancials,
+    assumptions: ForecastAssumptions,
+    wacc_result: WaccResult,
+    terminal_growth: float,
+    company: Company,
+    ctx: ValuationContext,
+    growth_shifts: list[float],
+    capex_shifts: list[float],
+) -> TwoWayTable:
+    """Capital intensity against demand: the pairing that decides an expansion-phase valuation."""
+    cells: list[TwoWayCell] = []
+    for dg in growth_shifts:
+        shifted_g = assumptions.model_copy(deep=True)
+        shifted_g.revenue_growth = [shift_assumption(a, dg, "Sensitivity") for a in shifted_g.revenue_growth]
+        pin_last_growth(
+            shifted_g.revenue_growth,
+            terminal_growth,
+            "Sensitivity: last explicit year stays at Gordon g.",
+        )
+        for dc in capex_shifts:
+            shifted = shifted_g.model_copy(deep=True)
+            shifted.capex_pct_revenue = [
+                shift_assumption(a, dc, "Sensitivity") for a in shifted.capex_pct_revenue
+            ]
+            result = _revalue(hist, shifted, wacc_result, terminal_growth, company, ctx)
+            cells.append(
+                TwoWayCell(
+                    row=dg,
+                    col=dc,
+                    enterprise_value=result.enterprise_value,
+                    equity_value_per_share=result.equity_bridge.equity_value_per_share,
+                )
+            )
+    return TwoWayTable(
+        row_name="Revenue growth shift (explicit years)",
+        col_name="Capex % of revenue shift",
+        row_range=list(growth_shifts),
+        col_range=list(capex_shifts),
+        cells=cells,
     )
 
 
@@ -266,6 +432,7 @@ def _terminal_growth_sensitivity(
             total_debt=ctx.total_debt,
             lease_liabilities=ctx.lease_liabilities,
             exit_multiple=ctx.exit_multiple,
+            non_operating_investments=ctx.non_operating_investments,
         )
         points.append(
             OneDimSensitivityPoint(

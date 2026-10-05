@@ -6,14 +6,12 @@ instead of typing in every line item by hand (spec sections 3-4).
 Design choices, disclosed to the caller via `IngestionResult.notes`:
   - Everything is converted to millions of the reporting currency.
   - Yahoo's own EBITDA / EBIT / Pre-Tax Income / Net Income / Tax figures are
-    treated as authoritative; COGS and operating opex are NOT independently
-    reconstructed line-by-line (Yahoo's summarized data doesn't reliably
-    separate them for every company/sector, e.g. banks). Instead the model's
-    single `ga` bucket is back-solved so EBITDA ties out exactly to Yahoo's
-    reported figure, and `other_below_ebit` is back-solved so Pre-Tax Income
-    ties out exactly. This never fabricates a number Yahoo didn't report -
-    it only chooses how to distribute an already-reported total across our
-    internal line items.
+    treated as authoritative. Cost of revenue, R&D, and selling & marketing are
+    mapped from Yahoo when those rows exist and stored as positive costs
+    (Yahoo sometimes signs expenses negative). Remaining operating cost above
+    EBITDA sits in `ga` so Yahoo's EBITDA still ties. `other_below_ebit` is
+    back-solved so Pre-Tax Income ties out. This never fabricates a Yahoo
+    total - it only allocates an already-reported figure across our lines.
   - Only fiscal years present in ALL of (income statement, balance sheet,
     cash flow) are used, so every historical year is fully populated.
 """
@@ -42,9 +40,23 @@ class IngestionResult(BaseModel):
     warnings: list[str] = []
 
 
-def _row(df: pd.DataFrame, label: str) -> pd.Series:
-    if label in df.index:
-        return df.loc[label].astype(float).fillna(0.0)
+def _fold_label(value: str) -> str:
+    return "".join(ch for ch in str(value).casefold() if ch.isalnum())
+
+
+def _match_index(df: pd.DataFrame, *labels: str) -> str | None:
+    index_map = {_fold_label(label): label for label in df.index}
+    for name in labels:
+        key = _fold_label(name)
+        if key in index_map:
+            return index_map[key]
+    return None
+
+
+def _row(df: pd.DataFrame, *labels: str) -> pd.Series:
+    name = _match_index(df, *labels)
+    if name:
+        return df.loc[name].astype(float).fillna(0.0)
     return pd.Series(0.0, index=df.columns)
 
 
@@ -53,15 +65,89 @@ def _val(series: pd.Series, col, default: float = 0.0) -> float:
     return default if pd.isna(v) else float(v)
 
 
-def _has_row(df: pd.DataFrame, label: str) -> bool:
-    return label in df.index and df.loc[label].notna().any()
+def _has_row(df: pd.DataFrame, *labels: str) -> bool:
+    name = _match_index(df, *labels)
+    return bool(name) and df.loc[name].notna().any()
 
 
-def _raw_row(df: pd.DataFrame, label: str) -> pd.Series:
+def _raw_row(df: pd.DataFrame, *labels: str) -> pd.Series:
     """Unlike `_row`, does NOT fill NaN with 0 - used to detect genuinely missing (not zero) periods."""
-    if label in df.index:
-        return df.loc[label]
+    name = _match_index(df, *labels)
+    if name:
+        return df.loc[name]
     return pd.Series(float("nan"), index=df.columns)
+
+
+def _as_cost(value: float) -> float:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return 0.0
+    if number != number or number in (float("inf"), float("-inf")):
+        return 0.0
+    return abs(number)
+
+
+def build_income_statement(
+    period: str,
+    *,
+    revenue: float,
+    ebitda: float,
+    ebit: float,
+    pretax: float,
+    interest: float,
+    taxes: float,
+    cogs: float = 0.0,
+    rnd: float = 0.0,
+    sm: float = 0.0,
+    warnings: list[str] | None = None,
+) -> IncomeStatement:
+    """
+    Map a Yahoo (or pasted) P&L into the engine.
+
+    Expense lines are stored as positive costs. G&A is the residual so
+    `revenue - cogs - rnd - sm - ga` still equals Yahoo's EBITDA.
+    """
+    notes = warnings if warnings is not None else []
+    cogs_cost = _as_cost(cogs)
+    rnd_cost = _as_cost(rnd)
+    sm_cost = _as_cost(sm)
+    interest_expense = _as_cost(interest)
+    da = ebitda - ebit
+    residual = revenue - ebitda - cogs_cost - rnd_cost - sm_cost
+    if residual < -1e-6:
+        notes.append(
+            f"{period}: Cost of goods / R&D / S&M exceed Revenue minus EBITDA. "
+            "G&A is set to 0; verify this year's operating costs independently."
+        )
+        ga = 0.0
+    else:
+        ga = residual
+    if da < 0:
+        notes.append(
+            f"{period}: Yahoo Finance's reported EBIT ({ebit:,.0f}) exceeds its reported EBITDA "
+            f"({ebitda:,.0f}), implying negative D&A. This is a data quality issue in the "
+            "source, not a calculation performed by this app; verify this year's figures independently "
+            "before relying on them."
+        )
+    if revenue > 0 and (revenue - ebitda) < -1e-6:
+        notes.append(
+            f"{period}: Reported EBITDA ({ebitda:,.0f}) exceeds Revenue ({revenue:,.0f}), "
+            "which is not possible for operating income; verify this year's figures independently."
+        )
+    other_below_ebit = pretax - ebit + interest_expense
+    return IncomeStatement(
+        period=period,
+        revenue=revenue,
+        cogs=cogs_cost,
+        rnd=rnd_cost,
+        sm=sm_cost,
+        ga=ga,
+        da=da,
+        interest_expense=interest_expense,
+        taxes=taxes,
+        other_below_ebit=other_below_ebit,
+    )
 
 
 def fetch_company(ticker: str) -> IngestionResult:
@@ -137,7 +223,7 @@ def fetch_company(ticker: str) -> IngestionResult:
         # Sales ratio should fall roughly within 0.02x-100x. If the UNCONVERTED figures already
         # produce a plausible P/S ratio while the CONVERTED ones do not, the tag is almost
         # certainly mislabeled - skip the conversion rather than corrupt the model.
-        _raw_rev_row = _raw_row(income_stmt, "Total Revenue" if _has_row(income_stmt, "Total Revenue") else "Operating Revenue")
+        _raw_rev_row = _raw_row(income_stmt, "Total Revenue", "Operating Revenue")
         _raw_rev_latest = next((v for v in _raw_rev_row.sort_index(ascending=False) if pd.notna(v)), None)
         market_cap = info.get("marketCap")
         if _raw_rev_latest and market_cap:
@@ -185,7 +271,7 @@ def fetch_company(ticker: str) -> IngestionResult:
     # silently becomes an all-zero historical year once NaN defaults to 0 below - corrupting every
     # historical average (capex %, margins, etc.) computed across the years. Require the anchor
     # fields to be genuinely present, not just the column to exist.
-    _raw_revenue = _raw_row(income_stmt, "Total Revenue" if _has_row(income_stmt, "Total Revenue") else "Operating Revenue")
+    _raw_revenue = _raw_row(income_stmt, "Total Revenue", "Operating Revenue")
     _raw_ebitda = _raw_row(income_stmt, "EBITDA")
     _raw_ebit = _raw_row(income_stmt, "EBIT")
     _raw_total_assets = _raw_row(balance_sheet, "Total Assets")
@@ -208,9 +294,9 @@ def fetch_company(ticker: str) -> IngestionResult:
     notes: list[str] = [
         "Historical financials sourced from Yahoo Finance (yfinance). Figures converted to millions of the "
         "reporting currency.",
-        "COGS/operating-expense line items are not independently available from this source; EBITDA, EBIT, "
-        "Pre-Tax Income and Net Income are Yahoo Finance's own reported figures, with the gap between Revenue "
-        "and EBITDA allocated to a single combined opex line.",
+        "Cost of revenue, R&D, and selling & marketing are taken from Yahoo when those rows exist "
+        "and stored as positive costs. Remaining operating cost above EBITDA is shown as G&A so "
+        "Yahoo's EBITDA, EBIT, Pre-Tax Income, and Net Income still tie.",
         "Balance sheet 'Other Assets' and 'Other Liabilities' are residual figures computed against Yahoo "
         "Finance's own reported Total Assets / Total Liabilities (rather than summing every individual "
         "sub-line item), so each year ties out exactly to Yahoo's authoritative totals; the specific "
@@ -228,16 +314,23 @@ def fetch_company(ticker: str) -> IngestionResult:
     if fx_conversion_skipped_note:
         warnings.append(fx_conversion_skipped_note)
 
-    revenue_row = _row(income_stmt, "Total Revenue")
-    if not _has_row(income_stmt, "Total Revenue"):
-        revenue_row = _row(income_stmt, "Operating Revenue")
+    revenue_row = _row(income_stmt, "Total Revenue", "Operating Revenue")
     ebitda_row = _row(income_stmt, "EBITDA")
     ebit_row = _row(income_stmt, "EBIT")
     pretax_row = _row(income_stmt, "Pretax Income")
     _raw_pretax_row = _raw_row(income_stmt, "Pretax Income")
     tax_row = _row(income_stmt, "Tax Provision")
-    interest_row = _row(income_stmt, "Interest Expense")
+    interest_row = _row(income_stmt, "Interest Expense", "Interest Expense Non Operating")
     net_income_row = _row(income_stmt, "Net Income")
+    cogs_row = _row(income_stmt, "Cost Of Revenue", "Reconciled Cost Of Revenue", "CostOfRevenue")
+    rnd_row = _row(income_stmt, "Research And Development", "Research Development", "ResearchAndDevelopment")
+    sm_row = _row(
+        income_stmt,
+        "Selling And Marketing Expense",
+        "Selling And Marketing",
+        "Marketing Expense",
+        "SellingAndMarketingExpense",
+    )
 
     cash_row = _row(balance_sheet, "Cash And Cash Equivalents")
     mkt_sec_row = _row(balance_sheet, "Other Short Term Investments")
@@ -282,7 +375,6 @@ def fetch_company(ticker: str) -> IngestionResult:
         revenue = _val(revenue_row, period)
         ebitda = _val(ebitda_row, period)
         ebit = _val(ebit_row, period)
-        interest_expense = max(_val(interest_row, period), 0.0)
         taxes = _val(tax_row, period)
 
         if pd.isna(_raw_pretax_row.get(period)):
@@ -298,37 +390,21 @@ def fetch_company(ticker: str) -> IngestionResult:
         else:
             pretax = _val(pretax_row, period)
 
-        da = ebitda - ebit
-        ga = revenue - ebitda
-        other_below_ebit = pretax - ebit + interest_expense
-
-        # Internal-consistency check: Yahoo's own EBITDA and EBIT should never imply negative D&A.
-        # When they do, it signals a data quality issue in the source (restated figures, one-off
-        # reclassifications, etc.) rather than a mapping bug on our side - surfaced, not hidden.
-        if da < 0:
-            warnings.append(
-                f"{fy}: Yahoo Finance's reported EBIT ({ebit / MILLION:,.0f}M) exceeds its reported EBITDA "
-                f"({ebitda / MILLION:,.0f}M), implying negative D&A. This is a data quality issue in the "
-                "source, not a calculation performed by this app; verify this year's figures independently "
-                "before relying on them."
-            )
-        if revenue > 0 and ga < 0:
-            warnings.append(
-                f"{fy}: Reported EBITDA ({ebitda / MILLION:,.0f}M) exceeds Revenue ({revenue / MILLION:,.0f}M), "
-                "which is not possible for operating income; verify this year's figures independently."
-            )
-
-        inc = IncomeStatement(
-            period=fy,
+        inc = build_income_statement(
+            fy,
             revenue=revenue / MILLION,
-            cogs=0.0,
-            ga=ga / MILLION,
-            da=da / MILLION,
-            interest_expense=interest_expense / MILLION,
+            ebitda=ebitda / MILLION,
+            ebit=ebit / MILLION,
+            pretax=pretax / MILLION,
+            interest=_val(interest_row, period) / MILLION,
             taxes=taxes / MILLION,
-            other_below_ebit=other_below_ebit / MILLION,
+            cogs=_val(cogs_row, period) / MILLION,
+            rnd=_val(rnd_row, period) / MILLION,
+            sm=_val(sm_row, period) / MILLION,
+            warnings=warnings,
         )
         income_statements.append(inc)
+        da = inc.da * MILLION
 
         st_debt = max(_val(current_debt_row, period) - _val(current_lease_row, period), 0.0)
         lt_debt = max(_val(lt_debt_row, period) - _val(lt_lease_row, period), 0.0)

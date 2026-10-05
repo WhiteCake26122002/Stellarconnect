@@ -27,6 +27,7 @@ class AssumptionSource(str, Enum):
     ANALYST_CONSENSUS = "analyst_consensus"
     MARKET_DATA = "market_data"
     INDUSTRY_BENCHMARK = "industry_benchmark"
+    LLM_PROPOSAL = "llm_proposal"
     USER_ASSUMPTION = "user_assumption"
     CALCULATED = "calculated"
 
@@ -86,6 +87,9 @@ class Company(BaseModel):
     current_share_price: Optional[float] = None
     minority_interest: float = 0.0
     preferred_stock: float = 0.0
+    minority_interest_reported: bool = True
+    shares_status: str = "available"
+    shares_source: str = ""
 
 
 class IncomeStatement(BaseModel):
@@ -167,6 +171,21 @@ class BalanceSheet(BaseModel):
     lease_liabilities: float = 0.0
     other_liabilities: float = 0.0
     shareholders_equity: float
+    cash_reported: bool = True
+    operating_wc_complete: bool = True
+    cash_status: str = "available"
+    cash_source: str = ""
+    nwc_status: str = "available"
+    debt_status: str = "available"
+    debt_source: str = ""
+    non_operating_investments: float = 0.0
+    non_operating_investments_status: str = "unavailable"
+    non_operating_investments_source: str = ""
+    reported_total_assets: float | None = None
+    screener_other_assets_plug: float | None = None
+    screener_investments: float | None = None
+    screener_borrowings: float | None = None
+    source_overlay: dict = Field(default_factory=dict)
 
     @property
     def total_debt(self) -> float:

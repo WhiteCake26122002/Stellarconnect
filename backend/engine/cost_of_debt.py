@@ -74,6 +74,9 @@ def estimate_pretax_cost_of_debt(
     ebit: float,
     interest_expense: float,
     period_label: str = "",
+    *,
+    currency: str = "",
+    country: str = "",
 ) -> CostOfDebtEstimate:
     """
     Cost of Debt = Risk-Free Rate + Default Spread(synthetic rating from EBIT / Interest Expense).
@@ -105,6 +108,14 @@ def estimate_pretax_cost_of_debt(
     icr = ebit / interest_expense
     rating, spread = synthetic_rating_and_spread(icr)
     kd = risk_free_rate + spread
+    code = (currency or "").upper()
+    if code == "INR" or (country or "").strip().lower() == "india":
+        market_note = (
+            "Local 10Y G-Sec is the risk-free base, so India country risk is in Rf, not added again. "
+            "The Damodaran ICR table supplies a company credit spread, not a US Treasury yield. "
+        )
+    else:
+        market_note = "Credit spread is applied to the local-currency risk-free rate. "
 
     if ebit <= 0:
         coverage_note = f"EBIT is negative or zero{period_note} (interest coverage ratio {icr:.2f}x), "
@@ -114,8 +125,8 @@ def estimate_pretax_cost_of_debt(
     rationale = (
         f"{coverage_note}maps to a synthetic {rating} bond rating and a {spread:.2%} default spread "
         f"(Damodaran interest-coverage-ratio table for large non-financial firms). "
-        f"Cost of Debt = Risk-Free Rate ({risk_free_rate:.2%}) + Default Spread ({spread:.2%}) = {kd:.2%}. "
-        f"Source: {SOURCE}."
+        f"Cost of Debt = local Risk-Free Rate ({risk_free_rate:.2%}) + company credit spread ({spread:.2%}) = {kd:.2%}. "
+        f"{market_note} Source: {SOURCE}."
     )
 
     return CostOfDebtEstimate(

@@ -14,9 +14,10 @@ scheme list (which barely changes).
 from __future__ import annotations
 
 import datetime as dt
+import time
+from threading import Lock
 
 import requests
-import streamlit as st
 import yfinance as yf
 
 MFAPI_BASE = "https://api.mfapi.in/mf"
@@ -33,10 +34,37 @@ BENCHMARK_INDICES: dict[str, str] = {
     "NIFTY 500": "^CRSLDX",
 }
 INDEX_HISTORY_TTL_SECONDS = 6 * 3600
+_MISS_TTL_SECONDS = 60
+
+_lock = Lock()
+_cache: dict[str, tuple[float, object]] = {}
 
 
-@st.cache_data(ttl=SCHEME_LIST_TTL_SECONDS, show_spinner=False)
+def _recall(key: str):
+    now = time.monotonic()
+    with _lock:
+        hit = _cache.get(key)
+        if hit is None or hit[0] <= now:
+            _cache.pop(key, None)
+            return None
+        return hit[1]
+
+
+def _remember(key: str, value, ttl: float) -> None:
+    with _lock:
+        _cache[key] = (time.monotonic() + ttl, value)
+
+
 def get_all_schemes() -> list[dict]:
+    cached = _recall("schemes")
+    if cached is not None:
+        return cached
+    schemes = _fetch_all_schemes()
+    _remember("schemes", schemes, SCHEME_LIST_TTL_SECONDS if schemes else _MISS_TTL_SECONDS)
+    return schemes
+
+
+def _fetch_all_schemes() -> list[dict]:
     """Every AMFI scheme currently tracked by mfapi.in: [{"code": int, "name": str}, ...]."""
     try:
         resp = requests.get(MFAPI_BASE, timeout=REQUEST_TIMEOUT_SECONDS)
@@ -59,8 +87,20 @@ def search_schemes(query: str, schemes: list[dict], limit: int = 20) -> list[dic
     return matches[:limit]
 
 
-@st.cache_data(ttl=SCHEME_DETAIL_TTL_SECONDS, show_spinner=False)
 def get_scheme_detail(scheme_code: int) -> dict | None:
+    key = f"scheme:{scheme_code}"
+    cached = _recall(key)
+    if cached is not None:
+        return cached if cached != _MISS else None
+    detail = _fetch_scheme_detail(scheme_code)
+    _remember(key, detail if detail is not None else _MISS, SCHEME_DETAIL_TTL_SECONDS if detail else _MISS_TTL_SECONDS)
+    return detail
+
+
+_MISS = object()
+
+
+def _fetch_scheme_detail(scheme_code: int) -> dict | None:
     """
     {"fund_house", "scheme_category", "scheme_name", "nav_history": [(date, nav), ...]}
     nav_history is sorted most-recent-first. None on any fetch/parse failure.
@@ -90,8 +130,17 @@ def get_scheme_detail(scheme_code: int) -> dict | None:
         return None
 
 
-@st.cache_data(ttl=INDEX_HISTORY_TTL_SECONDS, show_spinner=False)
 def get_index_history(ticker: str) -> list[tuple[dt.date, float]]:
+    key = f"index:{ticker}"
+    cached = _recall(key)
+    if cached is not None:
+        return cached
+    history = _fetch_index_history(ticker)
+    _remember(key, history, INDEX_HISTORY_TTL_SECONDS if history else _MISS_TTL_SECONDS)
+    return history
+
+
+def _fetch_index_history(ticker: str) -> list[tuple[dt.date, float]]:
     """Daily closing levels for `ticker` over the last 10 years, sorted oldest-first. Empty list
     on failure - callers should treat that as "benchmark comparison unavailable", not crash."""
     try:

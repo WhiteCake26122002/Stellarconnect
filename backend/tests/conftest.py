@@ -7,6 +7,20 @@ from ..engine.historical import analyze_historicals
 from ..engine.wacc import calculate_wacc
 
 
+@pytest.fixture(autouse=True)
+def disable_live_growth_llm(monkeypatch):
+    """Never spend against a real LLM key from a developer machine during unit tests."""
+    monkeypatch.setenv("GROWTH_LLM_ENABLED", "0")
+    monkeypatch.delenv("GROWTH_LLM_API_KEY", raising=False)
+    try:
+        from ..api.config import get_settings
+
+        get_settings.cache_clear()
+    except Exception:
+        pass
+
+
+
 @pytest.fixture
 def company():
     return build_orion_company()

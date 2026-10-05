@@ -1,20 +1,23 @@
 """
 Forecast engine: builds explicit-period projections of revenue, margins,
 opex, D&A, capex, and NWC, each backed by a labeled, sourced `Assumption`.
-
-Phase 1 implements Method A (Historical Trend) as the default methodology:
-revenue growth glides linearly from the recent historical run-rate toward a
-user-set long-run growth rate, and operating margins glide from the
-historical average toward a user-set target margin. Every generated
-assumption carries a plain-language rationale (spec section 6/7) and can be
-overridden per year without touching the engine.
 """
 from __future__ import annotations
 
 from pydantic import BaseModel
 
+from .company_profile import BusinessTemplate, CompanyProfile, classify_company
+from .growth_evidence import (
+    GrowthEvidence,
+    build_growth_evidence,
+    confidence_for,
+    year_rationale,
+)
 from .historical import HistoricalSummary
-from .models import AssumptionSource, Assumption, Confidence, HistoricalFinancials, IncomeStatement
+from .models import Assumption, AssumptionSource, Company, Confidence, HistoricalFinancials
+
+INDIA_STATUTORY_TAX = 0.2517  # 22% + 10% surcharge + 4% cess
+MAX_DEFAULT_START_GROWTH = 0.40
 
 
 def glide_path(start: float, end: float, n: int) -> list[float]:
@@ -37,6 +40,11 @@ class ForecastAssumptions(BaseModel):
     capex_pct_revenue: list[Assumption]
     nwc_pct_revenue: list[Assumption]
     tax_rate: list[Assumption]
+    nwc_method: str = "balance_sheet"
+    nwc_delta_pct_of_delta_revenue: float | None = None
+    growth_regime: str = "moderate"
+    year1_method: str = "statistical_blend"
+    fade_target: float = 0.025
 
 
 class ForecastYear(BaseModel):
@@ -66,13 +74,82 @@ class ForecastResult(BaseModel):
 
 
 def _next_periods(last_historical_period: str, n: int) -> list[str]:
-    # Expect labels like "FY2026"; if that pattern isn't found, fall back to generic labels.
     try:
         prefix = "".join(ch for ch in last_historical_period if not ch.isdigit())
         year = int("".join(ch for ch in last_historical_period if ch.isdigit()))
         return [f"{prefix}{year + i}" for i in range(1, n + 1)]
     except ValueError:
         return [f"Forecast Year {i}" for i in range(1, n + 1)]
+
+
+def _capex_end(
+    summary: HistoricalSummary,
+    profile: CompanyProfile,
+    fade_to: float = 0.04,
+) -> tuple[float, str]:
+    start = summary.median_capex_pct_3y
+    da = summary.avg_da_pct_revenue
+    policy = profile.capex_policy
+    if policy == "fade_growth_with_revenue":
+        maintenance = da
+        excess = max(0.0, start - maintenance)
+        hist_g = summary.last_1y_growth if summary.last_1y_growth is not None else summary.revenue_cagr_3y
+        if hist_g is None or hist_g <= 0.02:
+            end = start
+            note = (
+                "Growth vs maintenance capex: historical growth is too low to treat excess capex as "
+                "expansion, so the last-3-year median is held."
+            )
+        else:
+            scale = min(1.0, max(fade_to, 0.0) / hist_g)
+            end = maintenance + excess * scale
+            note = (
+                f"Maintenance capex ≈ D&A ({da:.1%} of sales). Excess {excess:.1%} is treated as growth "
+                f"capex and scaled by terminal g {fade_to:.1%} / historical growth {hist_g:.1%}. "
+                "Negative current FCF is not assumed to persist after expansion slows."
+            )
+    elif policy == "maintain_with_da_floor":
+        end = max(da, start * 0.90)
+        note = (
+            "Asset-heavy / manufacturing: capex stays near the last-3-year median, floored at D&A, "
+            "because growth still requires reinvestment."
+        )
+    elif policy == "maintain_historical":
+        end = start
+        note = "Capex held at the last-3-year median of revenue (no automatic glide to D&A)."
+    elif policy == "partial_normalize":
+        end = (start + da) / 2
+        note = "Mixed intensity: capex glides halfway from the last-3-year median toward D&A."
+    else:
+        end = da
+        note = "Asset-light: capex glides toward D&A (maintenance) by the last explicit year."
+    return end, note
+
+
+def _tax_assumption(summary: HistoricalSummary, currency: str, period: str, source_date: str) -> Assumption:
+    effective = summary.avg_tax_rate
+    if (currency or "").upper() == "INR":
+        value = INDIA_STATUTORY_TAX
+        rationale = (
+            f"Indian statutory corporate tax of {INDIA_STATUTORY_TAX:.2%} "
+            "(22% + 10% surcharge + 4% cess) used for NOPAT. "
+            f"Historical effective rate was {effective:.1%} — shown as a cross-check, not the forecast tax."
+        )
+        confidence = Confidence.HIGH
+    else:
+        value = effective
+        rationale = f"Tax rate held at the {effective:.1%} historical average effective rate."
+        confidence = Confidence.MEDIUM
+    return Assumption(
+        name="Tax Rate",
+        value=value,
+        unit="%",
+        period=period,
+        source=AssumptionSource.CALCULATED,
+        source_date=source_date,
+        confidence=confidence,
+        rationale=rationale,
+    )
 
 
 def build_default_assumptions(
@@ -82,59 +159,95 @@ def build_default_assumptions(
     long_term_growth_rate: float = 0.04,
     target_ebitda_margin: float | None = None,
     source_date: str = "",
+    *,
+    terminal_growth: float | None = None,
+    company: Company | None = None,
+    methodology: str = "evidence",
+    growth_evidence: GrowthEvidence | None = None,
+    profile: CompanyProfile | None = None,
 ) -> ForecastAssumptions:
     """
-    Method A - Historical Trend. Revenue growth glides from the recent
-    historical run-rate toward `long_term_growth_rate`; margins glide from
-    the historical average toward `target_ebitda_margin` (defaults to the
-    best historical year, i.e. modest operating-leverage improvement).
+    Default operating model.
+
+    `methodology=evidence` (default): Year-1 from the growth-evidence hierarchy, fade to
+    terminal growth. `methodology=historical`: legacy 2-year run-rate glide, kept for
+    comparison, still fades to terminal growth rather than a separate 4% knob.
+    Target EBITDA defaults to the last-3-year median, not the historical maximum.
     """
     periods = _next_periods(hist.income_statements[-1].period, forecast_years)
-
-    raw_start_growth = summary.recent_2y_avg_growth if summary.recent_2y_avg_growth is not None else (
-        summary.revenue_cagr_3y or summary.revenue_cagr_5y or 0.05
+    fade_to = terminal_growth if terminal_growth is not None else long_term_growth_rate
+    currency = company.currency if company else ""
+    profile = profile or (
+        classify_company(company, summary)
+        if company is not None
+        else CompanyProfile(
+            template=BusinessTemplate.OTHER,
+            asset_intensity="mixed",
+            fcff_appropriate=True,
+            capex_policy="partial_normalize",
+            rationale="No company profile supplied.",
+        )
     )
-    # Cap the auto-populated starting growth rate. A 2-year-average "recent run-rate" is a lagging
-    # figure - for a company coming off a low base (e.g. a one-off disruption like a platform migration,
-    # a depressed prior year, or a land-banking/expansion phase), it can sit well above even that
-    # company's own most recent quarterly trend, let alone anything sustainable for a 5-year explicit
-    # forecast. Sustained organic revenue growth above this ceiling is rare for any established company
-    # regardless of industry, so silently defaulting to it (rather than requiring the user to
-    # deliberately dial in a very bullish number) risks presenting an extreme, transient rebound rate as
-    # if it were an ordinary base case. The cap only affects the untouched default - a user who has
-    # genuine conviction a company will keep growing this fast can still override it via the slider.
-    MAX_DEFAULT_START_GROWTH = 0.40
-    start_growth = min(raw_start_growth, MAX_DEFAULT_START_GROWTH)
-    capped = start_growth < raw_start_growth
-    growth_path = glide_path(start_growth, long_term_growth_rate, forecast_years)
 
-    revenue_growth: list[Assumption] = []
-    for period, g in zip(periods, growth_path):
+    evidence = growth_evidence
+    if methodology != "historical":
+        if evidence is None:
+            evidence = build_growth_evidence(
+                summary,
+                forecast_years=forecast_years,
+                terminal_growth=fade_to,
+            )
+        growth_path = list(evidence.path)
+        growth_conf = confidence_for(evidence)
+        revenue_growth = []
+        for i, (period, g) in enumerate(zip(periods, growth_path)):
+            revenue_growth.append(
+                Assumption(
+                    name="Revenue Growth",
+                    value=g,
+                    unit="%",
+                    period=period,
+                    source=evidence.year1_source,
+                    source_date=source_date,
+                    confidence=growth_conf,
+                    rationale=year_rationale(evidence, period, i, g),
+                )
+            )
+        regime = evidence.regime.value
+        year1_method = evidence.year1_method
+    else:
+        raw_start = summary.recent_2y_avg_growth if summary.recent_2y_avg_growth is not None else (
+            summary.revenue_cagr_3y or summary.revenue_cagr_5y or 0.05
+        )
+        start_growth = min(raw_start, MAX_DEFAULT_START_GROWTH)
+        capped = start_growth < raw_start
+        growth_path = glide_path(start_growth, fade_to, forecast_years)
         hist_ref = summary.revenue_cagr_5y or summary.revenue_cagr_3y or start_growth
         cap_note = (
-            f" The actual recent 2-year-average run-rate was {raw_start_growth:.1%}, capped to {MAX_DEFAULT_START_GROWTH:.0%} "
-            "for this default since sustained growth above that level is rarely representative of an "
-            "ordinary base case (often a rebound from a depressed prior year or a one-off event) - "
-            "override with a higher number in the sidebar if you have specific reason to expect it to continue."
-            if capped else ""
+            f" The actual recent 2-year-average run-rate was {raw_start:.1%}, capped to {MAX_DEFAULT_START_GROWTH:.0%}."
+            if capped
+            else ""
         )
-        revenue_growth.append(
-            Assumption(
-                name="Revenue Growth",
-                value=g,
-                unit="%",
-                period=period,
-                source=AssumptionSource.CALCULATED,
-                source_date=source_date,
-                confidence=Confidence.MEDIUM,
-                rationale=(
-                    f"{period} revenue growth is assumed at {g:.1%}, glided from the recent "
-                    f"{start_growth:.1%} run-rate toward a {long_term_growth_rate:.1%} long-term normalized "
-                    f"rate over the {forecast_years}-year forecast horizon (vs. {hist_ref:.1%} historical "
-                    f"5-year CAGR), reflecting expected growth normalization.{cap_note}"
-                ),
+        revenue_growth = []
+        for period, g in zip(periods, growth_path):
+            revenue_growth.append(
+                Assumption(
+                    name="Revenue Growth",
+                    value=g,
+                    unit="%",
+                    period=period,
+                    source=AssumptionSource.CALCULATED,
+                    source_date=source_date,
+                    confidence=Confidence.MEDIUM,
+                    rationale=(
+                        f"{period} revenue growth is {g:.1%}, using the legacy 2-year run-rate glide "
+                        f"from {start_growth:.1%} toward terminal growth {fade_to:.1%} "
+                        f"(vs {hist_ref:.1%} historical 5-year CAGR).{cap_note}"
+                    ),
+                )
             )
-        )
+        regime = "historical_glide"
+        year1_method = "recent_2y_avg"
 
     last_gm = hist.income_statements[-1].gross_margin
     gross_margin = [
@@ -155,14 +268,15 @@ def build_default_assumptions(
         for p, v in zip(periods, glide_path(last_gm, last_gm, forecast_years))
     ]
 
-    target_margin = target_ebitda_margin if target_ebitda_margin is not None else max(
-        y.ebitda_margin for y in summary.years
-    )
+    # Peak historical margin is an upside case, not the base default.
+    default_target = summary.median_ebitda_margin_3y
+    target_margin = target_ebitda_margin if target_ebitda_margin is not None else default_target
+    if target_ebitda_margin is None and (target_margin - summary.avg_da_pct_revenue) < 0:
+        # Do not compound operating losses into perpetuity. EBIT breakeven is a
+        # going-concern placeholder, not a mature-margin assumption.
+        target_margin = max(0.0, summary.avg_da_pct_revenue)
     last_revenue = hist.income_statements[-1].revenue
 
-    # Derive opex-as-%-revenue glide paths so that (gross_margin - total_opex_pct) reaches target_margin.
-    # Guard against a zero-revenue base year (e.g. a pre-revenue or data-gap period): fall back to the
-    # historical average opex ratios rather than dividing by zero.
     if last_revenue:
         last_rnd_pct = hist.income_statements[-1].rnd / last_revenue
         last_sm_pct = hist.income_statements[-1].sm / last_revenue
@@ -191,9 +305,16 @@ def build_default_assumptions(
                     confidence=Confidence.MEDIUM,
                     rationale=(
                         f"{name} modeled at {v:.1%} of revenue in {p}, gliding from {start:.1%} "
-                        f"({hist.income_statements[-1].period} actual) toward {end:.1%} as the model assumes "
-                        f"operating leverage improves EBITDA margin toward {target_margin:.1%} by "
-                        f"{periods[-1]}."
+                        f"({hist.income_statements[-1].period} actual) toward {end:.1%} so EBITDA "
+                        f"approaches the mid-cycle target of {target_margin:.1%} by {periods[-1]} "
+                        f"(not the latest year and not the peak)."
+                        if profile.template.value == "cyclical"
+                        else (
+                            f"{name} modeled at {v:.1%} of revenue in {p}, gliding from {start:.1%} "
+                            f"({hist.income_statements[-1].period} actual) toward {end:.1%} so EBITDA "
+                            f"approaches the last-3-year median target of {target_margin:.1%} by {periods[-1]} "
+                            f"(not the historical peak)."
+                        )
                     ),
                 )
             )
@@ -220,17 +341,8 @@ def build_default_assumptions(
         for p in periods
     ]
 
-    # Capex glides from the recent historical average toward the D&A % of revenue by the final
-    # forecast year, rather than being held flat at the historical average forever. A company mid
-    # expansion (e.g. building out new capacity) can run capex well above D&A for years - but holding
-    # that elevated ratio flat all the way through the terminal year means the Gordon Growth perpetuity
-    # (which assumes the business has settled into its stable, long-run state) is built on a permanently
-    # over-investing company, which mechanically depresses FCFF and understates the valuation. In
-    # steady state, capex approximately tracks D&A (reinvesting to maintain/modestly grow the asset
-    # base at the stable growth rate) - this is the standard treatment in DCF practice (see Damodaran on
-    # reinvestment normalizing toward stable growth), not a special case for any one company.
-    capex_start = summary.avg_capex_pct_revenue
-    capex_end = summary.avg_da_pct_revenue
+    capex_start = summary.median_capex_pct_3y
+    capex_end, capex_note = _capex_end(summary, profile, fade_to=fade_to)
     capex_path = glide_path(capex_start, capex_end, forecast_years)
     capex_pct = [
         Assumption(
@@ -242,46 +354,49 @@ def build_default_assumptions(
             source_date=source_date,
             confidence=Confidence.MEDIUM,
             rationale=(
-                f"Capex modeled at {v:.1%} of revenue in {p}, gliding from the {capex_start:.1%} recent "
-                f"historical average (vs. {summary.years[-1].capex_pct_revenue:.1%} in the most recent year) "
-                f"toward {capex_end:.1%} - the historical D&A % of revenue - by {periods[-1]}, reflecting the "
-                "standard DCF assumption that reinvestment normalizes to roughly track depreciation once the "
-                "business settles into the stable long-run growth priced into the terminal value."
+                f"Capex modeled at {v:.1%} of revenue in {p}, from last-3-year median {capex_start:.1%} "
+                f"toward {capex_end:.1%}. {capex_note} {profile.rationale}"
             ),
         )
         for p, v in zip(periods, capex_path)
     ]
 
+    if summary.nwc_method == "cash_flow_derived":
+        if summary.nwc_delta_pct_of_delta_revenue is None:
+            nwc_value = 0.0
+            nwc_rationale = (
+                "Balance-sheet operating working capital is unavailable, and cash-flow ΔNWC / Δrevenue "
+                "history is also unavailable. ΔNWC is not fabricated from a silent zero intensity; "
+                "FCFF includes no working-capital charge and is flagged as a substitute with missing data."
+            )
+        else:
+            nwc_value = summary.nwc_delta_pct_of_delta_revenue
+            nwc_rationale = (
+                "Balance-sheet operating working capital is unavailable (missing AR/inventory/AP). "
+                f"ΔNWC is forecast as {nwc_value:.1%} of the change in revenue, the historical median of "
+                "cash-flow ΔNWC / Δrevenue. This is an explicit substitute, not a silent zero."
+            )
+    else:
+        nwc_value = summary.avg_nwc_pct_revenue
+        nwc_rationale = (
+            f"Net working capital modeled at the {nwc_value:.1%} historical average of revenue "
+            "(operating current assets minus operating current liabilities)."
+        )
     nwc_pct = [
         Assumption(
-            name="NWC % of Revenue",
-            value=summary.avg_nwc_pct_revenue,
-            unit="% of revenue",
+            name="NWC % of Revenue" if summary.nwc_method == "balance_sheet" else "ΔNWC / ΔRevenue",
+            value=nwc_value,
+            unit="% of revenue" if summary.nwc_method == "balance_sheet" else "% of Δrevenue",
             period=p,
             source=AssumptionSource.CALCULATED,
             source_date=source_date,
-            confidence=Confidence.MEDIUM,
-            rationale=(
-                f"Net working capital modeled at the {summary.avg_nwc_pct_revenue:.1%} historical average of "
-                f"revenue, held constant given no evidence of a structural change in payment terms."
-            ),
+            confidence=Confidence.MEDIUM if summary.nwc_method == "balance_sheet" else Confidence.LOW,
+            rationale=nwc_rationale,
         )
         for p in periods
     ]
 
-    tax_rate = [
-        Assumption(
-            name="Tax Rate",
-            value=summary.avg_tax_rate,
-            unit="%",
-            period=p,
-            source=AssumptionSource.CALCULATED,
-            source_date=source_date,
-            confidence=Confidence.MEDIUM,
-            rationale=f"Tax rate held at the {summary.avg_tax_rate:.1%} historical average effective rate.",
-        )
-        for p in periods
-    ]
+    tax_rate = [_tax_assumption(summary, currency, p, source_date) for p in periods]
 
     return ForecastAssumptions(
         forecast_years=periods,
@@ -294,6 +409,11 @@ def build_default_assumptions(
         capex_pct_revenue=capex_pct,
         nwc_pct_revenue=nwc_pct,
         tax_rate=tax_rate,
+        nwc_method=summary.nwc_method,
+        nwc_delta_pct_of_delta_revenue=summary.nwc_delta_pct_of_delta_revenue,
+        growth_regime=regime,
+        year1_method=year1_method,
+        fade_target=fade_to,
     )
 
 
@@ -304,12 +424,14 @@ def project_financials(
     """Rolls the assumption set forward into a full forecast, year by year."""
     n = len(assumptions.forecast_years)
     base_revenue = hist.income_statements[-1].revenue
-    prior_nwc = hist.balance_sheets[-1].net_working_capital
+    prior_nwc = hist.balance_sheets[-1].net_working_capital if assumptions.nwc_method == "balance_sheet" else 0.0
+    cf_ratio = assumptions.nwc_delta_pct_of_delta_revenue or 0.0
 
     years: list[ForecastYear] = []
     revenue = base_revenue
     for i in range(n):
         g = assumptions.revenue_growth[i].effective_value
+        prior_revenue = revenue
         revenue = revenue * (1 + g)
 
         gm = assumptions.gross_margin[i].effective_value
@@ -331,21 +453,13 @@ def project_financials(
         nopat = ebit - taxes_on_ebit
 
         capex = revenue * assumptions.capex_pct_revenue[i].effective_value
-        nwc = revenue * assumptions.nwc_pct_revenue[i].effective_value
-        change_in_nwc = nwc - prior_nwc
+        if assumptions.nwc_method == "cash_flow_derived":
+            change_in_nwc = cf_ratio * (revenue - prior_revenue)
+            nwc = prior_nwc + change_in_nwc
+        else:
+            nwc = revenue * assumptions.nwc_pct_revenue[i].effective_value
+            change_in_nwc = nwc - prior_nwc
         prior_nwc = nwc
-
-        # Reinvestment-rate guard rail (Damodaran: g = ROIC x Reinvestment Rate - no company's working
-        # capital build should structurally consume most of its profit forever). This matters for
-        # companies where net working capital is a large multiple of revenue (e.g. real-estate
-        # developers, whose land/WIP "inventory" can otherwise single-handedly overwhelm FCFF every
-        # forecast year); it does not bind for ordinary operating companies, whose working-capital
-        # swings are already small relative to NOPAT. Deliberately scoped to the NWC drag alone (not
-        # combined with capex) so an intentionally large capex assumption elsewhere can't get silently
-        # offset by forcing working capital the other way.
-        MAX_NWC_DRAG_OF_NOPAT = 0.75
-        if nopat > 0 and change_in_nwc > MAX_NWC_DRAG_OF_NOPAT * nopat:
-            change_in_nwc = MAX_NWC_DRAG_OF_NOPAT * nopat
 
         fcff = nopat + da - capex - change_in_nwc
 

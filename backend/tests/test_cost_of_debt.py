@@ -51,8 +51,18 @@ def test_negative_ebit_maps_to_worst_tier():
     assert result.default_spread == pytest.approx(0.19)
 
 
+def test_india_cost_of_debt_uses_local_rf_not_us_treasury():
+    result = estimate_pretax_cost_of_debt(
+        risk_free_rate=0.065, ebit=1000.0, interest_expense=200.0, currency="INR", country="India"
+    )
+    assert "G-Sec" in result.rationale or "India country risk is in Rf" in result.rationale
+    assert "not a US Treasury" in result.rationale
+
+
 def test_rationale_discloses_source_and_formula():
     result = estimate_pretax_cost_of_debt(risk_free_rate=0.065, ebit=1000.0, interest_expense=200.0, period_label="FY2026")
     assert "Damodaran" in result.rationale
     assert "FY2026" in result.rationale
     assert "5.00x" in result.rationale
+
+

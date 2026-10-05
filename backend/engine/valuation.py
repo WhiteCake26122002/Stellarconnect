@@ -22,6 +22,7 @@ class DiscountedYear(BaseModel):
 class EquityBridge(BaseModel):
     enterprise_value: float
     plus_cash_and_investments: float
+    plus_non_operating_investments: float = 0.0
     less_total_debt: float
     less_lease_liabilities: float
     less_minority_interest: float
@@ -31,6 +32,12 @@ class EquityBridge(BaseModel):
     equity_value_per_share: float | None
     current_share_price: float | None
     upside_downside: float | None
+    cash_status: str = "reported"
+    minority_interest_status: str = "reported"
+    debt_status: str = "reported"
+    shares_status: str = "reported"
+    bridge_complete: bool = True
+    block_reason: str | None = None
 
 
 class DCFValuationResult(BaseModel):
@@ -67,21 +74,33 @@ def bridge_to_equity_value(
     preferred_stock: float,
     diluted_shares_outstanding: float | None,
     current_share_price: float | None,
+    cash_status: str = "reported",
+    minority_interest_status: str = "reported",
+    debt_status: str = "reported",
+    shares_status: str = "reported",
+    bridge_complete: bool = True,
+    block_reason: str | None = None,
+    non_operating_investments: float = 0.0,
 ) -> EquityBridge:
     equity_value = (
         enterprise_value
         + cash_and_investments
+        + non_operating_investments
         - total_debt
         - lease_liabilities
         - minority_interest
         - preferred_stock
     )
-    per_share = (equity_value / diluted_shares_outstanding) if diluted_shares_outstanding else None
-    upside = (per_share / current_share_price - 1) if (per_share is not None and current_share_price) else None
+    per_share = None
+    upside = None
+    if bridge_complete and diluted_shares_outstanding:
+        per_share = equity_value / diluted_shares_outstanding
+        upside = (per_share / current_share_price - 1) if current_share_price else None
 
     return EquityBridge(
         enterprise_value=enterprise_value,
         plus_cash_and_investments=cash_and_investments,
+        plus_non_operating_investments=non_operating_investments,
         less_total_debt=total_debt,
         less_lease_liabilities=lease_liabilities,
         less_minority_interest=minority_interest,
@@ -91,6 +110,12 @@ def bridge_to_equity_value(
         equity_value_per_share=per_share,
         current_share_price=current_share_price,
         upside_downside=upside,
+        cash_status=cash_status,
+        minority_interest_status=minority_interest_status,
+        debt_status=debt_status,
+        shares_status=shares_status,
+        bridge_complete=bridge_complete,
+        block_reason=block_reason,
     )
 
 
@@ -103,6 +128,13 @@ def run_dcf_valuation(
     total_debt: float,
     lease_liabilities: float,
     exit_multiple: float | None = None,
+    cash_status: str = "reported",
+    minority_interest_status: str = "reported",
+    debt_status: str = "reported",
+    shares_status: str = "reported",
+    bridge_complete: bool = True,
+    block_reason: str | None = None,
+    non_operating_investments: float = 0.0,
 ) -> DCFValuationResult:
     fcffs = [y.fcff for y in forecast.years]
     periods = [y.period for y in forecast.years]
@@ -133,6 +165,13 @@ def run_dcf_valuation(
         preferred_stock=company.preferred_stock,
         diluted_shares_outstanding=company.diluted_shares_outstanding,
         current_share_price=company.current_share_price,
+        cash_status=cash_status,
+        minority_interest_status=minority_interest_status,
+        debt_status=debt_status,
+        shares_status=shares_status,
+        bridge_complete=bridge_complete,
+        block_reason=block_reason,
+        non_operating_investments=non_operating_investments,
     )
 
     return DCFValuationResult(

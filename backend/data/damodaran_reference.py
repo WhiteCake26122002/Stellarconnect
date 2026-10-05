@@ -6,8 +6,9 @@ beta, equity risk premium, and tax rate (spec sections 13, 18-19).
 Bundled files (backend/data/reference/):
   - betaIndia.xls        Levered/unlevered beta by industry, India-listed firms
   - totalbetaIndia.xls   Total beta (small-cap/private-company adjusted) by industry, India
+  - histgrIndia.xls      Historical and expected revenue/EPS growth by industry, India
   - countrytaxrates.xls  Marginal corporate tax rate by country
-  - ctryprem.xlsx         Country equity risk premium (ERP) by country
+    - ctryprem.xlsx         Country equity risk premium (ERP) by country
 
 Nothing here is fabricated: every value returned is read directly out of these
 workbooks and matched to the requested industry/country via fuzzy text
@@ -47,6 +48,8 @@ class SectorBetaMatch(BaseModel):
 # that materially affects WACC.
 INDUSTRY_ALIASES: dict[str, str] = {
     "information technology services": "Computer Services",
+    "computers - software & consulting": "Computer Services",
+    "computers—software & consulting": "Computer Services",
     "software - infrastructure": "Software (System & Application)",
     "software - application": "Software (System & Application)",
     "software—infrastructure": "Software (System & Application)",
@@ -165,6 +168,17 @@ INDUSTRY_ALIASES: dict[str, str] = {
 }
 
 
+class SectorGrowthMatch(BaseModel):
+    matched_industry: str
+    match_score: float
+    low_confidence: bool
+    expected_growth: float
+
+
+class GrowthDataUnavailable(Exception):
+    """Raised when the Damodaran India growth workbook is not installed."""
+
+
 class CountryRiskData(BaseModel):
     country: str
     match_score: float
@@ -184,6 +198,13 @@ def _load_india_beta() -> pd.DataFrame:
 @functools.lru_cache(maxsize=1)
 def _load_india_total_beta() -> pd.DataFrame:
     df = pd.read_excel(REFERENCE_DIR / "totalbetaIndia.xls", sheet_name="Industry Averages", header=7)
+    return df.dropna(subset=["Industry Name"])
+
+
+@functools.lru_cache(maxsize=1)
+def _load_india_growth() -> pd.DataFrame:
+    # histgrIndia.xls "Industry Averages": title block is rows 0-6; column headers sit on row 7.
+    df = pd.read_excel(REFERENCE_DIR / "histgrIndia.xls", sheet_name="Industry Averages", header=7)
     return df.dropna(subset=["Industry Name"])
 
 
@@ -258,6 +279,51 @@ def match_india_sector_beta(industry_text: str) -> SectorBetaMatch:
         effective_tax_rate=float(row["Effective Tax rate"]),
         total_beta=float(total_beta_row["Total Levered Beta"]) if total_beta_row is not None else None,
         total_unlevered_beta=float(total_beta_row["Total Unlevered Beta"]) if total_beta_row is not None else None,
+    )
+
+
+def match_india_sector_growth(industry_text: str) -> SectorGrowthMatch:
+    """
+    Resolves a free-text industry/sector description to one of Damodaran's
+    India industry categories and returns its expected revenue growth rate.
+    Same resolution order as match_india_sector_beta(): curated alias table,
+    then fuzzy match above FUZZY_MATCH_CONFIDENCE_THRESHOLD, then a
+    low-confidence fallback — never silently guesses a wrong industry.
+    """
+    try:
+        growth_df = _load_india_growth()
+    except FileNotFoundError as exc:
+        raise GrowthDataUnavailable(
+            "Damodaran India growth workbook is not installed at "
+            f"{REFERENCE_DIR / 'histgrIndia.xls'}. Download histgrIndia.xls from "
+            "https://pages.stern.nyu.edu/~adamodar/pc/datasets/histgrIndia.xls "
+            "into backend/data/reference/."
+        ) from exc
+
+    choices = growth_df["Industry Name"].tolist()
+    normalized = industry_text.strip().lower()
+
+    match_name = None
+    score = 0.0
+    if normalized in INDUSTRY_ALIASES:
+        match_name = INDUSTRY_ALIASES[normalized]
+        score = 100.0
+    else:
+        result = process.extractOne(industry_text, choices, scorer=fuzz.token_sort_ratio)
+        if result and result[1] >= FUZZY_MATCH_CONFIDENCE_THRESHOLD:
+            match_name, score = result[0], result[1]
+
+    low_confidence = match_name is None
+    if match_name is None:
+        match_name = "Total Market"
+        score = 0.0
+
+    row = growth_df[growth_df["Industry Name"] == match_name].iloc[0]
+    return SectorGrowthMatch(
+        matched_industry=match_name,
+        match_score=score,
+        low_confidence=low_confidence,
+        expected_growth=float(row["Expected Growth in Revenues - Next 5 years"]),
     )
 
 
