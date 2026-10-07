@@ -80,6 +80,46 @@ class MfHolding(Base):
     created_at: Mapped[object] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class MfTransaction(Base):
+    """One dated purchase (units > 0) or redemption (units < 0) of a scheme.
+
+    `MfHolding` is the running position; this table is the cash-flow history that XIRR, the value
+    path and the benchmark comparison are measured from. Rows with source "aggregated" were created
+    from a holding that predates this table, so they carry that holding's single date and blended NAV.
+    """
+
+    __tablename__ = "mf_transactions"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=lambda: new_id("mft"))
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    scheme_code: Mapped[int] = mapped_column(Integer, index=True)
+    kind: Mapped[str] = mapped_column(String(8))  # "buy" | "sell"
+    trade_date: Mapped[str] = mapped_column(String(10))
+    units: Mapped[float] = mapped_column(Float)  # always positive; `kind` gives the direction
+    nav: Mapped[float] = mapped_column(Float)
+    source: Mapped[str] = mapped_column(String(16), default="entered")  # "entered" | "aggregated"
+    #: Redemptions only. Exit load and STT taken out of the proceeds, as they were when it happened.
+    #: Null on rows recorded before charges were tracked, which are treated as none.
+    exit_load: Mapped[float | None] = mapped_column(Float, nullable=True)
+    stt: Mapped[float | None] = mapped_column(Float, nullable=True)
+    created_at: Mapped[object] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class MfFundSetting(Base):
+    """What the user has told us about one scheme that the data sources cannot: its tax class (when the
+    AMFI category does not settle it) and its exit-load terms. Nothing here is guessed."""
+
+    __tablename__ = "mf_fund_settings"
+    __table_args__ = (UniqueConstraint("user_id", "scheme_code", name="uq_mf_setting_user_scheme"),)
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=lambda: new_id("mfs"))
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    scheme_code: Mapped[int] = mapped_column(Integer)
+    tax_class: Mapped[str | None] = mapped_column(String(16), nullable=True)  # equity | specified | other
+    exit_load_json: Mapped[list | None] = mapped_column(JSON, nullable=True)  # [{"days": 365, "pct": 1.0}]
+    updated_at: Mapped[object] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
 class IdempotencyKey(Base):
     __tablename__ = "idempotency_keys"
     __table_args__ = (UniqueConstraint("user_id", "key", name="uq_idempotency_user_key"),)

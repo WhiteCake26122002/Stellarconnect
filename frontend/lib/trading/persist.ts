@@ -8,8 +8,9 @@ import type {
   LayoutSave,
   Watchlist,
 } from "./types";
-import { cancelWorkingOrders, DEFAULT_FEES, freshAccount } from "./engine";
+import { cancelWorkingOrders, DEFAULT_FEES, freshAccount, normalizeFees } from "./engine";
 import type { EngineState } from "./engine";
+import type { EquityPoint, JournalEntry } from "./analytics";
 
 export const STORE_KEY = "orbit-desk-v1";
 
@@ -33,7 +34,12 @@ export type PersistShape = {
   chartCount: 1 | 2 | 3 | 4;
   slots: ChartSlot[];
   learningMode: boolean;
-  journals: Record<string, string>;
+  /** Notes on closed trades, keyed by trade id. A note saved by an older version is a plain string. */
+  journals: Record<string, JournalEntry | string>;
+  /** The reason given when buying, held until the position is sold and the trade is journaled. */
+  theses: Record<string, { why: string; expected: string }>;
+  /** Portfolio value readings saved while the desk is open: the only source for the value-over-time charts. */
+  equityHistory: EquityPoint[];
   /** Confetti and pulse on positive milestones. Toasts still show when this is off. */
   celebrate: boolean;
 };
@@ -45,7 +51,7 @@ export function defaultWatchlists(): Watchlist[] {
     { id: "bank", name: "Banking", symbols: ["BANKNIFTY", "HDFCBANK", "ICICIBANK", "SBIN"] },
     { id: "it", name: "IT Stocks", symbols: ["TCS", "INFY", "CNXIT"] },
     { id: "pf", name: "Portfolio", symbols: [] },
-    { id: "intraday", name: "Intraday", symbols: ["NIFTY", "BANKNIFTY", "FINNIFTY"] },
+    { id: "intraday", name: "Index watch", symbols: ["NIFTY", "BANKNIFTY", "FINNIFTY"] },
   ];
 }
 
@@ -61,7 +67,7 @@ export function defaultSlots(): ChartSlot[] {
 export function defaultPersist(): PersistShape {
   const lists = defaultWatchlists();
   return {
-    engine: { account: freshAccount(), orders: [], positions: [], trades: [], fees: DEFAULT_FEES },
+    engine: { account: freshAccount(), orders: [], positions: [], trades: [], fees: DEFAULT_FEES, fills: [] },
     watchlists: lists,
     activeWatchlistId: lists[0].id,
     recentSymbols: ["NIFTY", "BANKNIFTY", "RELIANCE", "TCS", "INFY"],
@@ -81,6 +87,8 @@ export function defaultPersist(): PersistShape {
     slots: defaultSlots(),
     learningMode: false,
     journals: {},
+    theses: {},
+    equityHistory: [],
     celebrate: true,
   };
 }
@@ -91,11 +99,16 @@ export function loadPersist(userId: string): PersistShape {
     if (!raw) return defaultPersist();
     const parsed = JSON.parse(raw) as PersistShape;
     const base = defaultPersist();
+    const fees = normalizeFees(parsed.fees ?? parsed.engine?.fees);
     return {
       ...base,
       ...parsed,
-      engine: cancelWorkingOrders({ ...base.engine, ...parsed.engine }),
+      fees,
+      engine: cancelWorkingOrders({ ...base.engine, ...parsed.engine, fees, fills: parsed.engine?.fills ?? [] }),
       journals: { ...base.journals, ...(parsed.journals || {}) },
+      theses: { ...(parsed.theses || {}) },
+      equityHistory: Array.isArray(parsed.equityHistory) ? parsed.equityHistory.filter((p) => Number.isFinite(p?.t) && Number.isFinite(p?.v)) : [],
+      watchlists: (parsed.watchlists || base.watchlists).map((w) => (w.id === "intraday" && w.name === "Intraday" ? { ...w, name: "Index watch" } : w)),
       learningMode: Boolean(parsed.learningMode),
       celebrate: parsed.celebrate !== false,
     };

@@ -3,7 +3,7 @@ import { registerAccount } from "./helpers";
 
 test("chart-first terminal: studies, ticket, paper trade, history, reset", async ({ page }) => {
   await registerAccount(page, { first: "Desk", last: "Trader" });
-  await page.getByRole("link", { name: "Open paper trading" }).click();
+  await page.getByRole("button", { name: /Paper trading/ }).click();
   await expect(page.getByTestId("terminal")).toBeVisible({ timeout: 30_000 });
   await expect(page.getByRole("link", { name: "Connect home" })).toBeVisible();
   await expect(page.getByRole("link", { name: "DCF" })).toBeVisible();
@@ -11,7 +11,10 @@ test("chart-first terminal: studies, ticket, paper trade, history, reset", async
   await expect(page.getByLabel("Pinned indices").getByText("NIFTY 50", { exact: true })).toBeVisible();
   await expect(page.getByLabel("Pinned indices").getByText("BANKNIFTY", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Position mix" })).toBeVisible();
-  await expect(page.getByText(/LIVE · 20s|SIMULATED/)).toBeVisible();
+  await expect(page.getByText(/MARKET DATA · 20s|SIMULATED/)).toBeVisible();
+  // The order ticket is docked beside the chart from the start; the watchlist is one tab away.
+  await expect(page.getByRole("region", { name: "Order ticket" })).toBeVisible();
+  await page.getByRole("tab", { name: "Watchlist" }).click();
   await expect(page.getByRole("button", { name: "Symbol", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Last", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Chg", exact: true })).toBeVisible();
@@ -101,40 +104,49 @@ test("chart-first terminal: studies, ticket, paper trade, history, reset", async
   await expect(page.getByRole("heading", { name: "NIFTY 50" })).toBeVisible();
 
   await page.getByRole("tab", { name: "Trade" }).click();
-  await page.getByRole("button", { name: "BUY", exact: true }).click();
-  await expect(page.getByRole("tab", { name: "Trade" })).toHaveAttribute("aria-selected", "true");
-  await expect(page.getByLabel("Order type")).toHaveCount(0);
-  await expect(page.getByLabel("Limit price")).toHaveCount(0);
-  await page.getByLabel("Quantity").fill("25");
-  await page.getByLabel("Stop loss").fill("22000");
-  await page.getByLabel("Take profit").fill("25000");
-  await page.getByRole("button", { name: "PLACE BUY ORDER" }).click();
-  await expect(page.getByRole("dialog", { name: "Order summary" })).toBeVisible();
-  await page.getByRole("button", { name: "Confirm order" }).click();
-  await expect(page.getByText(/ORDER PLACED/)).toBeVisible();
+  // Market orders only: nothing to choose but the side and the quantity.
+  for (const gone of ["Order type", "Limit price", "Trigger price", "Stop loss", "Take profit", "Leverage", "Margin", "Intraday"]) {
+    await expect(page.getByLabel(gone)).toHaveCount(0);
+  }
+  await expect(page.getByRole("button", { name: "Intraday" })).toHaveCount(0);
+  await page.getByLabel("Quantity", { exact: true }).fill("25");
+  await page.getByRole("button", { name: "BUY NIFTY", exact: true }).click();
+  await expect(page.getByRole("dialog", { name: "Confirm order" })).toBeVisible();
+  await page.getByRole("button", { name: "Confirm Buy" }).click();
+  await expect(page.getByRole("dialog", { name: "Order executed" })).toBeVisible();
+  await expect(page.getByRole("dialog", { name: "Order executed" }).getByText("25 shares")).toBeVisible();
+  await page.getByRole("button", { name: "Done" }).click();
 
   await page.getByRole("button", { name: /Positions/ }).click();
-  await expect(page.getByRole("cell", { name: "NIFTY 50" })).toBeVisible();
-  await page.getByRole("button", { name: "Close", exact: true }).click();
-  await expect(page.getByRole("dialog", { name: "Close position" })).toBeVisible();
-  await page.getByRole("button", { name: "Close position" }).click();
+  await expect(page.getByRole("cell", { name: "NIFTY 50", exact: true })).toBeVisible();
+  // A stray global `.empty` rule once gave the sparkline cell 3.5rem of padding and made every row 120px tall.
+  const rowHeight = await page.locator("table.pt-positions tbody tr").first().evaluate((r) => r.getBoundingClientRect().height);
+  expect(rowHeight).toBeLessThan(70);
+  // SELL on a row opens the same ticket, already on the sell side with the position shown.
+  await page.getByRole("button", { name: "Sell NIFTY 50" }).click();
+  await expect(page.getByLabel("Your NIFTY 50 position")).toBeVisible();
+  await page.getByRole("button", { name: "SELL NIFTY", exact: true }).click();
+  await page.getByRole("button", { name: "Confirm Sell" }).click();
+  await expect(page.getByRole("dialog", { name: "Order executed" })).toBeVisible();
+  await page.getByRole("button", { name: "Done" }).click();
 
   await expect(page.getByRole("button", { name: "Journal" })).toHaveAttribute("aria-selected", "true");
   await expect(page.getByLabel("Trade journal note")).toBeVisible();
   await page.getByLabel("Trade journal note").fill("Closed after the fill — paper size from cash.");
-  await page.locator(".blot-bar").getByRole("button", { name: "Portfolio" }).click();
-  await expect(page.locator(".blot-port").getByText("Cash")).toBeVisible();
+  await page.locator(".blot-bar").getByRole("button", { name: "Analytics" }).click();
+  await expect(page.getByRole("heading", { name: "Trading behaviour" })).toBeVisible();
 
-  await page.getByRole("button", { name: "Trade history" }).click();
-  await expect(page.getByRole("cell", { name: "NIFTY" })).toBeVisible();
+  await page.locator(".blot-bar").getByRole("button", { name: "History" }).click();
+  await expect(page.getByRole("table", { name: "Transactions" }).getByRole("cell", { name: "NIFTY" }).first()).toBeVisible();
 
   await page.getByRole("button", { name: "Replay" }).click();
   await expect(page.getByRole("region", { name: "Replay mode" })).toBeVisible();
   await page.getByRole("tab", { name: "Trade" }).click();
-  await page.getByRole("button", { name: "PLACE BUY ORDER" }).click();
-  await page.getByRole("button", { name: "Confirm order" }).click();
+  await page.getByRole("button", { name: "BUY NIFTY", exact: true }).click();
+  await page.getByRole("button", { name: "Confirm Buy" }).click();
+  await page.getByRole("button", { name: "Done" }).click();
 
-  await page.getByRole("button", { name: "Account" }).click();
+  await page.locator(".blot-bar").getByRole("button", { name: "Analytics" }).click();
   await page.getByRole("button", { name: "Reset paper account" }).click();
   await page.getByRole("button", { name: "Reset everything" }).click();
   await expect(page.getByText("Paper account reset.")).toBeVisible();

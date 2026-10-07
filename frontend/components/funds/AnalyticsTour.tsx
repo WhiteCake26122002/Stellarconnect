@@ -9,7 +9,7 @@ const STEPS: Step[] = [
     target: "body",
     placement: "center",
     title: "Reading these numbers",
-    content: "Five quick hints on the measures below. Each compares your funds with the Nifty 500 over the same dates, so the comparison is fair.",
+    content: "A few quick hints on the measures below. Each one states the period it covers, and any measure that needs more history than you have shows \"Not enough history\" instead of a number.",
   },
   {
     target: "[data-tour='mf-ret']",

@@ -5,6 +5,8 @@ const nextConfig: NextConfig = {
   // The in-app data-check notice is the only persistent indicator. Build and runtime
   // errors still open the dev overlay; this only hides Next's corner badge.
   devIndicators: false,
+  // The dev server is reached as both localhost and 127.0.0.1 (the tests use the latter).
+  allowedDevOrigins: ["127.0.0.1"],
   async rewrites() {
     const backend = process.env.API_PROXY_TARGET || "http://127.0.0.1:8000";
     return [

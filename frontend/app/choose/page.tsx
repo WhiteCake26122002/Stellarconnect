@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { DeskChooser } from "@/components/DeskChooser";
 import { ApiError, api } from "@/lib/api";
-import "./choose.css";
+import "../desk.css";
 
 export default function ChoosePage() {
   const router = useRouter();
@@ -27,15 +27,15 @@ export default function ChoosePage() {
 
   if (error) {
     return (
-      <main className="choose-root" style={{ placeItems: "center" }}>
+      <main className="dk-choose">
         <p className="error">{error}</p>
       </main>
     );
   }
   if (!ready) {
     return (
-      <main className="choose-root" style={{ placeItems: "center" }} aria-busy="true">
-        <p className="choose-hint">Opening desks…</p>
+      <main className="dk-choose" aria-busy="true">
+        <p className="muted">Opening desks…</p>
       </main>
     );
   }

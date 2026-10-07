@@ -102,7 +102,7 @@ export function DirectVsRegular({ code, name, nav }: { code: number; name: strin
             <>
               {navGap != null ? (
                 <>
-                  Direct NAV is <strong className={navGap >= 0 ? "bull" : "bear"}>{Math.abs(navGap).toFixed(1)}% {navGap >= 0 ? "higher" : "lower"}</strong>: the cost gap that has built up since both plans started.{" "}
+                  Direct NAV is <strong className={navGap >= 0 ? "bull" : "bear"}>{Math.abs(navGap).toFixed(1)}% {navGap >= 0 ? "higher" : "lower"}</strong>: part of that gap is the running cost difference, though the two plans may have launched at different times, so it is not a pure cost measure.{" "}
                 </>
               ) : null}
               <Link href={`/funds/${cp.quote.scheme_code}`}>Open the {other} plan</Link>

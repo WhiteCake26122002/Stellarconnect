@@ -3,12 +3,20 @@
 import Link from "next/link";
 import { CSSProperties, useEffect, useMemo, useState } from "react";
 import { CompanyLogo } from "@/components/CompanyLogo";
-import { ApiError, api, FundHolding, FundQuote } from "@/lib/api";
-import { parseDay } from "@/lib/funds/analytics";
+import { ApiError, api, FundHistory, FundHolding, FundPortfolio, FundQuote, FundSchemeTax } from "@/lib/api";
+import type { TaxProfile } from "@/lib/costs/tax";
+import { parseDay, type SeriesSet } from "@/lib/funds/analytics";
 import { assetClass, assetKind, categoryRisk, categoryShort, marketCapBucket, planType, RISK_LABELS, RiskLevel } from "@/lib/funds/category";
 import { longDate, rupees, signedPoints, signedRupees, tone } from "@/lib/funds/format";
 import { pushRecent } from "@/lib/funds/local";
+import { benchView, BenchView, FundRow, pts, returnView, ReturnView, VERDICT_LABEL, verdictTone } from "@/lib/funds/returns";
 import { useFundsBook } from "@/lib/funds/useFundsBook";
+import { useFundHistory } from "@/lib/funds/useFundHistory";
+import { weeklySet } from "@/lib/funds/viz";
+import { FundDrawdown } from "./detail/FundDrawdown";
+import { FundHero } from "./detail/FundHero";
+import { FundTrailing } from "./detail/FundTrailing";
+import { useTaxProfile } from "@/components/costs/useTaxProfile";
 import { AlertEditor, NavQuote, useAlertCheck } from "./Alerts";
 import { DirectVsRegular } from "./DirectRegular";
 import { FactSheet, FactSheetActions } from "./FactSheet";
@@ -35,11 +43,26 @@ const RISK_STEPS: RiskLevel[] = [1, 2, 3, 4, 5, 6];
 type Meta = { name: string; house: string; category: string; nav: number | null; navDate: string | null };
 
 export function FundDetail({ code }: { code: number }) {
-  const { name, book, error, analysis, series } = useFundsBook();
+  const { name, userId, book, error, analysis, series, replaceBook } = useFundsBook();
+  const [taxProfile] = useTaxProfile(userId ?? undefined);
   const valid = Number.isInteger(code) && code > 0;
   const holding = book?.holdings.find((h) => h.scheme_code === code) ?? null;
   const [q, setQ] = useState<QuoteState>({ quote: null, error: "", loading: false });
   const [tab, setTab] = useHashTab<DetailTab>(DETAIL_TABS, "overview");
+  const [schemeTax, setSchemeTax] = useState<FundSchemeTax | null>(null);
+  const hist = useFundHistory(valid ? code : null);
+  const fundSet = useMemo(() => weeklySet(hist.data), [hist.data]);
+
+  // How the fund is taxed, for the printable fact sheet. The Overview tab loads the same rules for its own panel.
+  useEffect(() => {
+    if (!valid || !book) return;
+    const controller = new AbortController();
+    api
+      .fundSchemeTax(code, controller.signal)
+      .then(setSchemeTax)
+      .catch(() => setSchemeTax(null));
+    return () => controller.abort();
+  }, [code, valid, book]);
 
   useEffect(() => {
     if (!valid || !book || holding) return;
@@ -125,23 +148,20 @@ export function FundDetail({ code }: { code: number }) {
   const sole = holding && live.length === 1 && live[0].scheme_code === code;
   const risk = categoryRisk(meta.category, meta.name);
   const plan = planType(meta.name);
-  const fund = analysis.report?.funds.find((f) => f.scheme_name === meta.name) ?? null;
+  const fund = analysis.report?.funds.find((f) => f.scheme_code === code) ?? null;
+  const blocked = analysis.report?.blocked ?? [];
+  const ret = returnView(fund, blocked);
+  const bench = benchView(fund);
 
   let source: AnalyticsSource;
-  if (sole) {
-    if (analysis.error) source = { state: "error", message: analysis.error };
-    else if (!analysis.report) source = { state: "loading" };
-    else if (!series) source = { state: "empty", message: "This appears once your position has at least two weekly marks after the purchase date." };
-    else source = { state: "ready", set: { ...series, subjectLabel: "This fund" }, basis: `Your position since ${longDate(parseDay(holding.purchase_date))}, time-weighted from` };
+  if (fundSet) {
+    source = { state: "ready", set: fundSet, basis: `This fund's published NAV, weekly, since ${longDate(fundSet.subject[0].t)}, from` };
+  } else if (hist.loading) {
+    source = { state: "loading" };
   } else {
-    source = {
-      state: "gap",
-      gaps: ["nav-history", "benchmark-levels"],
-      detail: holding
-        ? "Your portfolio's value path mixes several funds, so this fund's own path cannot be separated from it."
-        : "This scheme is not in your portfolio, and the API has no NAV path for it.",
-    };
+    source = { state: "empty", message: hist.error ? `The NAV history could not load: ${hist.error}` : "Insufficient history: this appears once the fund has a few weeks of published NAV." };
   }
+  void sole;
 
   return (
     <FundsShell name={name}>
@@ -182,15 +202,15 @@ export function FundDetail({ code }: { code: number }) {
         <TabList tabs={TAB_DEFS} current={tab} onChange={setTab} label="Fund sections" idPrefix="mf-fund" />
         <TabPanel idPrefix="mf-fund" current={tab}>
           <div className="funds-analysis">
-            {tab === "overview" ? <Overview code={code} meta={meta} holding={holding} total={book.totals.value} xirr={fund?.xirr ?? null} benchXirr={fund?.benchmark_xirr ?? null} analysisLoaded={!!analysis.report} holdings={book.holdings} risk={risk} /> : null}
-            {tab === "performance" ? <Performance holding={holding} source={source} xirr={fund?.xirr ?? null} benchXirr={fund?.benchmark_xirr ?? null} analysisLoaded={!!analysis.report} /> : null}
+            {tab === "overview" ? <Overview code={code} meta={meta} holding={holding} total={book.totals.value} ret={ret} bench={bench} perf={fund} analysisLoaded={!!analysis.report} holdings={book.holdings} risk={risk} taxProfile={taxProfile} onBook={replaceBook} history={hist.data} historyLoading={hist.loading} set={fundSet} /> : null}
+            {tab === "performance" ? <Performance source={source} /> : null}
             {tab === "holdings" ? <Holdings meta={meta} holding={holding} /> : null}
             {tab === "risk" ? <RiskTab meta={meta} risk={risk} source={source} /> : null}
             {tab === "documents" ? <Documents code={code} meta={meta} /> : null}
           </div>
         </TabPanel>
       </div>
-      <FactSheet data={{ code, name: meta.name, house: meta.house, category: meta.category, nav: meta.nav, navDate: meta.navDate, holding, xirr: fund?.xirr ?? null, benchXirr: fund?.benchmark_xirr ?? null }} />
+      <FactSheet data={{ code, name: meta.name, house: meta.house, category: meta.category, nav: meta.nav, navDate: meta.navDate, holding, ret, bench, verdict: fund ? VERDICT_LABEL[fund.verdict] : "", tax: schemeTax ? { label: schemeTax.classification.label, shortTerm: schemeTax.rules.short_term, longTerm: schemeTax.rules.long_term } : null }} />
     </FundsShell>
   );
 }
@@ -204,18 +224,30 @@ function Overview({
   meta,
   holding,
   total,
-  xirr,
-  benchXirr,
+  ret,
+  bench,
+  perf,
   analysisLoaded,
   holdings,
   risk,
+  taxProfile,
+  onBook,
+  history,
+  historyLoading,
+  set,
 }: {
+  taxProfile: TaxProfile;
+  onBook: (b: FundPortfolio) => void;
+  history: FundHistory | null;
+  historyLoading: boolean;
+  set: SeriesSet | null;
   code: number;
   meta: Meta;
   holding: FundHolding | null;
   total: number;
-  xirr: number | null;
-  benchXirr: number | null;
+  ret: ReturnView;
+  bench: BenchView;
+  perf: FundRow | null;
   analysisLoaded: boolean;
   holdings: FundHolding[];
   risk: RiskLevel | null;
@@ -226,48 +258,15 @@ function Overview({
 
   return (
     <>
-      {holding ? (
-        <div className="funds-kpis mf-kpis-4">
-          <article className="kpi">
-            <div className="kpi-top">Your value</div>
-            <div className="v">{rupees(holding.value)}</div>
-            <div className="kpi-foot">
-              <span className="muted">
-                {total > 0 ? `${((holding.value / total) * 100).toFixed(1)}% of your book` : ""} · {holding.units.toLocaleString("en-IN", { maximumFractionDigits: 3 })} units
-              </span>
-            </div>
-          </article>
-          <article className="kpi">
-            <div className="kpi-top">Gain since purchase</div>
-            <div className={`v ${tone(holding.gain)}`}>{signedRupees(holding.gain)}</div>
-            <div className="kpi-foot">
-              <span className={`delta ${tone(holding.gain_pct)}`}>{signedPoints(holding.gain_pct)}</span>
-              <span className="muted"> · bought {longDate(parseDay(holding.purchase_date))}</span>
-            </div>
-          </article>
-          <article className="kpi">
-            <div className="kpi-top">1Y return</div>
-            <div className={`v ${tone(holding.return_1y)}`}>{signedPoints(holding.return_1y)}</div>
-            <div className="kpi-foot">
-              <span className="muted">Point to point</span>
-            </div>
-          </article>
-          <article className="kpi">
-            <div className="kpi-top">Your XIRR</div>
-            <div className={`v ${tone(xirr)}`}>{analysisLoaded ? signedPoints(xirr) : <span className="skel mf-skel-num" aria-label="Loading" />}</div>
-            <div className="kpi-foot">
-              <span className="muted">Nifty 500, same dates: {analysisLoaded ? signedPoints(benchXirr) : "…"}</span>
-            </div>
-          </article>
-        </div>
-      ) : (
+      <FundHero holding={holding} nav={meta.nav} navDate={meta.navDate} total={total} ret={ret} bench={bench} history={history} loading={historyLoading} set={set} />
+      {!holding ? (
         <div className="banner mf-notheld">
           <span>Not in your portfolio. Watch it, or add the units you hold to track value, gain and XIRR here.</span>
           <Link className="btn small" href={`/funds?add=${code}`}>
             Add to portfolio
           </Link>
         </div>
-      )}
+      ) : null}
 
       <div className="mf-grid-2">
         <section className="card mf-panel" aria-labelledby="mf-facts-t">
@@ -327,7 +326,7 @@ function Overview({
           </dl>
           <GapNote gaps={["expense-ratio", "aum", "inception", "riskometer"]}>Cost, size and age are not published to this desk yet.</GapNote>
         </section>
-        <TaxPanel category={meta.category} name={meta.name} holding={holding} />
+        <TaxPanel code={code} name={meta.name} holding={holding} profile={taxProfile} onBook={onBook} />
       </div>
 
       <DirectVsRegular code={code} name={meta.name} nav={meta.nav} />
@@ -352,48 +351,19 @@ function useNavMap(code: number, nav: number | null, date: string | null) {
   return useMemo(() => new Map<number, NavQuote>(nav == null ? [] : [[code, { nav, date }]]), [code, nav, date]);
 }
 
-function Performance({ holding, source, xirr, benchXirr, analysisLoaded }: { holding: FundHolding | null; source: AnalyticsSource; xirr: number | null; benchXirr: number | null; analysisLoaded: boolean }) {
-  const alpha = xirr != null && benchXirr != null ? xirr - benchXirr : null;
+function Performance({ source }: { source: AnalyticsSource }) {
+  if (source.state !== "ready") {
+    return (
+      <section className="vz-section" aria-label="Performance">
+        <h2 className="vz-h">Performance</h2>
+        {source.state === "loading" ? <div className="skel vz-plot-skel" aria-label="Loading performance" /> : <p className="vz-unavailable">{source.state === "error" || source.state === "empty" ? source.message : "Unavailable."}</p>}
+      </section>
+    );
+  }
   return (
     <>
-      {holding ? (
-        <div className="funds-kpis">
-          <article className="kpi">
-            <div className="kpi-top">1Y return</div>
-            <div className={`v ${tone(holding.return_1y)}`}>{signedPoints(holding.return_1y)}</div>
-            <div className="kpi-foot">
-              <span className="muted">Point to point; rolling returns below</span>
-            </div>
-          </article>
-          <article className="kpi">
-            <div className="kpi-top">Your XIRR</div>
-            <div className={`v ${tone(xirr)}`}>{analysisLoaded ? signedPoints(xirr) : <span className="skel mf-skel-num" aria-label="Loading" />}</div>
-            <div className="kpi-foot">
-              <span className="muted">Money-weighted, from your purchase date</span>
-            </div>
-          </article>
-          <article className="kpi">
-            <div className="kpi-top">vs Nifty 500</div>
-            <div className={`v ${tone(alpha)}`}>{analysisLoaded ? (alpha == null ? "n/a" : signedPoints(alpha).replace("%", " pts")) : <span className="skel mf-skel-num" aria-label="Loading" />}</div>
-            <div className="kpi-foot">
-              <span className="muted">Nifty 500 on the same dates: {analysisLoaded ? signedPoints(benchXirr) : "…"}</span>
-            </div>
-          </article>
-        </div>
-      ) : null}
-      {source.state === "gap" ? (
-        <DataGap title="Growth and rolling returns" gaps={source.gaps}>
-          <p className="muted">{source.detail}</p>
-          <p className="muted">
-            Waiting on this data: growth of ₹100 against Nifty 50, Nifty 500 and the category, and 1Y / 3Y / 5Y rolling returns. The same panels already run on your whole portfolio in the Analysis tab.
-          </p>
-        </DataGap>
-      ) : (
-        <>
-          <GrowthOverlayPanel source={source} title="Growth of ₹100 vs benchmarks" />
-          <RollingReturnsPanel source={source} />
-        </>
-      )}
+      <FundTrailing set={source.set} />
+      <RollingReturnsPanel source={source} />
     </>
   );
 }
@@ -470,7 +440,7 @@ function Holdings({ meta, holding }: { meta: Meta; holding: FundHolding | null }
           ) : (
             <p className="muted mf-empty-line">You do not hold this fund.</p>
           )}
-          {holding ? <GapNote gaps={["lots"]}>Top-ups are blended into one line.</GapNote> : null}
+          {holding ? <p className="cx-quiet-text">Every purchase and SIP instalment is kept as its own lot: see Tax and exit load on the Overview tab.</p> : null}
         </section>
       </div>
     </>
@@ -508,17 +478,11 @@ function RiskTab({ meta, risk, source }: { meta: Meta; risk: RiskLevel | null; s
         </ol>
         <GapNote gaps={["riskometer"]}>The official riskometer level is not in the API.</GapNote>
       </section>
-      {source.state === "gap" ? (
-        <DataGap title="Volatility, Sharpe, drawdown and down markets" gaps={source.gaps}>
-          <p className="muted">{source.detail}</p>
-          <p className="muted">These run on your whole portfolio in the Analysis tab today.</p>
-        </DataGap>
-      ) : (
-        <div className="mf-grid-2">
-          <RiskReturnPanel source={source} />
-          <DownMarketsPanel source={source} />
-        </div>
-      )}
+      {source.state === "ready" ? <FundDrawdown set={source.set} /> : null}
+      <div className="mf-grid-2">
+        <RiskReturnPanel source={source} />
+        <DownMarketsPanel source={source} />
+      </div>
     </>
   );
 }

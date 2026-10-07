@@ -11,6 +11,7 @@ import { initials } from "@/lib/format";
 import { useViewMode } from "@/lib/prefs";
 import { AppSwitch } from "@/components/AppSwitch";
 import { ConnectLogo } from "@/components/ConnectLogo";
+import { display } from "@/components/home/cinema/font";
 
 export type ShellSurface =
   | "dashboard"
@@ -112,7 +113,7 @@ export function AppShell({
   }
 
   return (
-    <div className="desk">
+    <div className={`desk ${display.variable}`}>
       {/* suppressHydrationWarning in the header: browser tooling adds data-* refs to these controls before hydration. */}
       <header className="masthead">
         <button

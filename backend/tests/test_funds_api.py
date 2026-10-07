@@ -66,10 +66,11 @@ def test_funds_round_trip(client, monkeypatch):
     })
     assert created.status_code == 201, created.text
     body = created.json()
-    assert body["totals"]["invested"] == 1000
+    # 10 units at Rs 100 is Rs 1,000 of units; the 0.005% stamp duty taken out of the money paid makes the amount paid Rs 1,000.05
+    assert body["totals"]["invested"] == pytest.approx(1000.05)
     assert body["totals"]["value"] == 1200
     assert body["holdings"][0]["scheme_name"].startswith("HDFC")
-    assert body["holdings"][0]["gain_pct"] == 20
+    assert body["holdings"][0]["gain_pct"] == pytest.approx(19.994, abs=0.001)  # 1,200 against the 1,000.05 paid
     assert body["disclaimer"]
 
     search = client.get("/v1/funds/schemes", params={"q": "flexi"})
@@ -84,8 +85,11 @@ def test_funds_round_trip(client, monkeypatch):
     assert analysis.status_code == 200
     report = analysis.json()
     assert report["ready"] is True
-    assert report["xirr"] is not None
+    assert report["period"]["days"] >= 365
+    assert report["portfolio"]["xirr"]["annualized"] is True
+    assert report["portfolio"]["xirr"]["value"] == pytest.approx(report["portfolio"]["cagr_pct"], abs=0.1)
     assert report["asset_allocation"][0]["label"] == "Equity"
+    assert report["blocked"] == []
 
     topped = client.post("/v1/funds/holdings", json={"scheme_code": 119598, "units": 10, "avg_nav": 140, "purchase_date": bought})
     assert topped.status_code == 201

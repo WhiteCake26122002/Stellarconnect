@@ -8,9 +8,10 @@ import { useReducedMotion } from "@/lib/motion";
 import { GRID, MUTED } from "./chartTheme";
 
 const SERIES = [
-  { key: "portfolio", label: "Your portfolio", color: "#0b9e96" },
-  { key: "n50", label: "Nifty 50, same rupees and dates", color: "#3b6fbf" },
-  { key: "n500", label: "Nifty 500, same rupees and dates", color: "#b8860b" },
+  { key: "portfolio", label: "Your portfolio value", color: "#727272" },
+  { key: "invested", label: "Money you put in (net)", color: "#8a8a8a" },
+  { key: "n50", label: "Nifty 50, same rupees and dates", color: "#4a4a4a" },
+  { key: "n500", label: "Nifty 500, same rupees and dates", color: "#626262" },
 ] as const;
 
 const RANGES = [
@@ -26,10 +27,11 @@ type Row = {
   t: number;
   date: string;
   portfolio: number | null;
+  invested: number | null;
   n50: number | null;
   n500: number | null;
-  change: number | null;
-  changePct: number | null;
+  /** Value minus net money put in: the profit so far, which new purchases cannot move. */
+  profit: number | null;
 };
 
 function signed(v: number, body: string): string {
@@ -55,7 +57,7 @@ export function ChartSkeleton({ title, height = 260 }: { title: string; height?:
  * Portfolio value over time against the two index benchmarks, from the weekly `growth` series the
  * analysis endpoint returns. The range buttons slice that series client-side.
  */
-export function ValueChart({ growth }: { growth: FundAnalysis["growth"] }) {
+export function ValueChart({ growth, blocked = [] }: { growth: FundAnalysis["growth"]; blocked?: readonly string[] }) {
   const reduce = useReducedMotion();
   const gid = gradientId(useId());
   const all = useMemo<Row[]>(() => {
@@ -64,21 +66,13 @@ export function ValueChart({ growth }: { growth: FundAnalysis["growth"] }) {
         t: new Date(`${p.date}T00:00:00`).getTime(),
         date: p.date,
         portfolio: p.portfolio,
+        invested: p.invested ?? null,
         n50: p.benchmarks["NIFTY 50"] ?? null,
         n500: p.benchmarks["NIFTY 500"] ?? null,
-        change: null as number | null,
-        changePct: null as number | null,
+        profit: p.portfolio != null && p.invested != null ? p.portfolio - p.invested : null,
       }))
       .filter((r) => Number.isFinite(r.t))
       .sort((a, b) => a.t - b.t);
-    for (let i = 1; i < rows.length; i++) {
-      const prev = rows[i - 1].portfolio;
-      const cur = rows[i].portfolio;
-      if (prev != null && cur != null) {
-        rows[i].change = cur - prev;
-        rows[i].changePct = prev ? ((cur - prev) / prev) * 100 : null;
-      }
-    }
     return rows;
   }, [growth]);
 
@@ -93,6 +87,15 @@ export function ValueChart({ growth }: { growth: FundAnalysis["growth"] }) {
   const picked = RANGES.find((r) => r.id === range) ?? RANGES[RANGES.length - 1];
   const rows = usable(picked.days) ? slice(picked.days) : all;
 
+  if (blocked.includes("growth")) {
+    return (
+      <section className="card fund-chart-card">
+        <h2>Value over time</h2>
+        <p className="muted">Withheld: the chart ended at a different value from the portfolio total, so it is not drawn until the two agree.</p>
+      </section>
+    );
+  }
+
   if (all.length < 2) {
     return (
       <section className="card fund-chart-card">
@@ -102,10 +105,14 @@ export function ValueChart({ growth }: { growth: FundAnalysis["growth"] }) {
     );
   }
 
-  const start = rows.find((r) => r.portfolio != null)?.portfolio ?? null;
-  const end = [...rows].reverse().find((r) => r.portfolio != null)?.portfolio ?? null;
-  const moved = start != null && end != null ? end - start : null;
-  const movedPct = moved != null && start ? (moved / start) * 100 : null;
+  // Gain made inside this range. New purchases raise value and net money in by the same amount, so
+  // they cancel; dividing value-at-end by value-at-start instead would read new money as return.
+  const startRow = rows.find((r) => r.profit != null);
+  const endRow = [...rows].reverse().find((r) => r.profit != null);
+  const moved = startRow && endRow ? (endRow.profit as number) - (startRow.profit as number) : null;
+  const base = startRow && endRow ? (startRow.portfolio as number) + ((endRow.invested as number) - (startRow.invested as number)) : null;
+  const movedPct = moved != null && base && base > 0 ? (moved / base) * 100 : null;
+  const addedInRange = startRow && endRow ? (endRow.invested as number) - (startRow.invested as number) : 0;
   const hasN50 = rows.some((r) => r.n50 != null);
   const hasN500 = rows.some((r) => r.n500 != null);
 
@@ -115,14 +122,15 @@ export function ValueChart({ growth }: { growth: FundAnalysis["growth"] }) {
         <div>
           <h2>Value over time</h2>
           <p className="muted">
-            Weekly marks from each scheme&apos;s AMFI NAV.{" "}
+            Your value against the money you put in; the gap between the lines is gain or loss, and a purchase lifts both together.{" "}
             {moved != null ? (
               <>
-                Over this range:{" "}
+                Gain made in this range:{" "}
                 <strong className={moved >= 0 ? "bull" : "bear"}>
                   {signed(moved, rupees(Math.abs(moved)))}
                   {movedPct != null ? ` (${signed(movedPct, `${Math.abs(movedPct).toFixed(2)}%`)})` : ""}
                 </strong>
+                {addedInRange > 1 ? <> after setting aside {rupees(addedInRange, 0)} of new money.</> : "."}
               </>
             ) : null}
           </p>
@@ -150,8 +158,8 @@ export function ValueChart({ growth }: { growth: FundAnalysis["growth"] }) {
           <ComposedChart data={rows} margin={{ top: 8, right: 10, bottom: 0, left: 0 }}>
             <defs>
               <linearGradient id={gid} x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor="#0b9e96" stopOpacity={0.24} />
-                <stop offset="100%" stopColor="#0b9e96" stopOpacity={0} />
+                <stop offset="0%" stopColor="#727272" stopOpacity={0.24} />
+                <stop offset="100%" stopColor="#727272" stopOpacity={0} />
               </linearGradient>
             </defs>
             <CartesianGrid vertical={false} stroke={GRID} />
@@ -185,13 +193,15 @@ export function ValueChart({ growth }: { growth: FundAnalysis["growth"] }) {
                     <span>
                       Value <b>{row.portfolio == null ? "n/a" : rupees(row.portfolio)}</b>
                     </span>
-                    {row.change != null ? (
+                    {row.invested != null ? (
                       <span>
-                        Since last mark{" "}
-                        <b className={row.change >= 0 ? "bull" : "bear"}>
-                          {signed(row.change, rupees(Math.abs(row.change)))}
-                          {row.changePct != null ? ` (${signed(row.changePct, `${Math.abs(row.changePct).toFixed(2)}%`)})` : ""}
-                        </b>
+                        Money put in <b>{rupees(row.invested)}</b>
+                      </span>
+                    ) : null}
+                    {row.profit != null ? (
+                      <span>
+                        Gain so far{" "}
+                        <b className={row.profit >= 0 ? "bull" : "bear"}>{signed(row.profit, rupees(Math.abs(row.profit)))}</b>
                       </span>
                     ) : null}
                     {row.n50 != null ? (
@@ -212,7 +222,7 @@ export function ValueChart({ growth }: { growth: FundAnalysis["growth"] }) {
               type="monotone"
               dataKey="portfolio"
               name="Your portfolio"
-              stroke="#0b9e96"
+              stroke="#727272"
               strokeWidth={2.2}
               fill={`url(#${gid})`}
               dot={false}
@@ -221,17 +231,18 @@ export function ValueChart({ growth }: { growth: FundAnalysis["growth"] }) {
               isAnimationActive={!reduce}
               animationDuration={450}
             />
+            <Line type="stepAfter" dataKey="invested" stroke="#8a8a8a" strokeWidth={1.4} strokeDasharray="5 4" dot={false} activeDot={{ r: 3 }} isAnimationActive={!reduce} animationDuration={450} />
             {hasN50 ? (
-              <Line type="monotone" dataKey="n50" stroke="#3b6fbf" strokeWidth={1.6} dot={false} activeDot={{ r: 3 }} isAnimationActive={!reduce} animationDuration={450} />
+              <Line type="monotone" dataKey="n50" stroke="#4a4a4a" strokeWidth={1.6} dot={false} activeDot={{ r: 3 }} isAnimationActive={!reduce} animationDuration={450} />
             ) : null}
             {hasN500 ? (
-              <Line type="monotone" dataKey="n500" stroke="#b8860b" strokeWidth={1.6} dot={false} activeDot={{ r: 3 }} isAnimationActive={!reduce} animationDuration={450} />
+              <Line type="monotone" dataKey="n500" stroke="#626262" strokeWidth={1.6} dot={false} activeDot={{ r: 3 }} isAnimationActive={!reduce} animationDuration={450} />
             ) : null}
           </ComposedChart>
         </ResponsiveContainer>
       </div>
       <ul className="alloc-legend">
-        {SERIES.filter((s) => s.key === "portfolio" || (s.key === "n50" ? hasN50 : hasN500)).map((s) => (
+        {SERIES.filter((s) => s.key === "portfolio" || s.key === "invested" || (s.key === "n50" ? hasN50 : hasN500)).map((s) => (
           <li key={s.key}>
             <i style={{ background: s.color }} />
             <span>{s.label}</span>

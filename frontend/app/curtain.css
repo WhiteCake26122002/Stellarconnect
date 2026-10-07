@@ -1,0 +1,103 @@
+/* Post-sign-in transition. The overlay is ink (#111, same as the sign-in button) so the iris
+   appears to grow out of the button itself; the mark and ring are the brand white. */
+
+/* globals.css reserves a scrollbar gutter on <html>, which a fixed overlay can't cover; tint the root too. */
+html:has(.curtain) { background: #111; }
+
+.curtain {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: grid;
+  place-items: center;
+  background: #111;
+  color: #fff;
+  clip-path: circle(var(--r) at var(--cx) var(--cy));
+}
+.curtain[data-phase="covering"] {
+  animation: curtain-open 700ms cubic-bezier(0.7, 0, 0.2, 1) both;
+}
+.curtain[data-phase="lifting"] {
+  pointer-events: none;
+  animation: curtain-lift 760ms cubic-bezier(0.7, 0, 0.2, 1) forwards;
+}
+@keyframes curtain-open {
+  from { clip-path: circle(0px at var(--cx) var(--cy)); }
+  to { clip-path: circle(var(--r) at var(--cx) var(--cy)); }
+}
+@keyframes curtain-lift {
+  from { clip-path: circle(var(--r) at 50% 50%); }
+  to { clip-path: circle(0px at 50% 50%); }
+}
+
+.curtain-core {
+  position: relative;
+  display: grid;
+  justify-items: center;
+  gap: 1.1rem;
+  animation: curtain-core-in 520ms cubic-bezier(0.2, 0.8, 0.2, 1) 280ms both;
+}
+.curtain[data-phase="lifting"] .curtain-core { animation: curtain-core-out 380ms ease-in both; }
+.curtain-mark {
+  width: 76px;
+  height: 76px;
+  animation: curtain-spin 2.4s cubic-bezier(0.6, 0, 0.3, 1) infinite;
+}
+.curtain-ring {
+  position: absolute;
+  top: -22px;
+  left: 50%;
+  width: 120px;
+  height: 120px;
+  margin-left: -60px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.14);
+  border-top-color: #fff;
+  animation: curtain-spin 1.1s linear infinite;
+}
+.curtain-label {
+  margin: 1.1rem 0 0;
+  color: #b6b6b6;
+  font: 500 0.78rem/1 var(--font-mono), ui-monospace, monospace;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+@keyframes curtain-spin { to { transform: rotate(360deg); } }
+@keyframes curtain-core-in {
+  from { opacity: 0; transform: scale(0.82); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes curtain-core-out {
+  to { opacity: 0; transform: scale(1.12); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .curtain[data-phase] { animation: none; }
+  .curtain-core, .curtain-mark, .curtain-ring { animation: none; }
+}
+
+/* The welcome: a small line, then the name rising letter by letter */
+.curtain-greeting { display: grid; justify-items: center; gap: 0.55rem; margin-top: 1.2rem; }
+.curtain-kicker {
+  margin: 0;
+  color: #b6b6b6;
+  font: 500 0.82rem/1 var(--font-mono), ui-monospace, monospace;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  animation: curtain-kicker-in 520ms cubic-bezier(0.2, 0.8, 0.2, 1) 420ms both;
+}
+.curtain-name {
+  margin: 0;
+  max-width: 88vw;
+  font-size: clamp(2rem, 6vw, 3.6rem);
+  font-weight: 750;
+  letter-spacing: -0.035em;
+  line-height: 1.08;
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+.curtain-name span { display: inline-block; animation: curtain-letter 560ms cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+.curtain-greeting + .curtain-label { margin-top: 0.4rem; }
+@keyframes curtain-kicker-in { from { opacity: 0; letter-spacing: 0.5em; } to { opacity: 1; letter-spacing: 0.2em; } }
+@keyframes curtain-letter { from { opacity: 0; transform: translateY(0.55em) scale(0.9); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .curtain-kicker, .curtain-name span { animation: none; } }

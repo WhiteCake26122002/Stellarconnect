@@ -20,8 +20,7 @@ export type GapId =
   | "fund-manager"
   | "alerts-service"
   | "watchlist-sync"
-  | "documents"
-  | "lots";
+  | "documents";
 
 export type DataGap = {
   title: string;
@@ -52,7 +51,7 @@ export const DATA_GAPS: Record<GapId, DataGap> = {
   "category-benchmark": {
     title: "Category benchmark mapping",
     missing:
-      "Only Nifty 50 and Nifty 500 are tracked. A mid-cap or debt fund's own benchmark (Nifty Midcap 150, CRISIL indices, …) is not available, so beta is measured against Nifty 500.",
+      "Each fund is compared with a benchmark chosen from its category where an index history exists. Debt and hybrid benchmarks (CRISIL indices) have no free history here, so those funds are shown without a comparison.",
     proposal: "Add scheme → benchmark index mapping and serve that index's history",
   },
   "risk-free": {
@@ -99,8 +98,8 @@ export const DATA_GAPS: Record<GapId, DataGap> = {
   },
   "exit-load": {
     title: "Exit load",
-    missing: "Exit-load schedules live in each scheme's SID / KIM. The API has none, so the charge on an early sale cannot be shown.",
-    proposal: "Expose exit_load: [{ within_days, pct }] on /v1/funds/schemes/{code}",
+    missing: "Exit-load schedules live in each scheme's SID / KIM and no free feed publishes them. You can enter a fund's terms yourself; until then redemptions say the information is unavailable.",
+    proposal: "Ingest exit_load: [{ within_days, pct }] per scheme from AMC factsheets or a licensed feed",
   },
   "fund-manager": {
     title: "Fund manager",
@@ -123,10 +122,5 @@ export const DATA_GAPS: Record<GapId, DataGap> = {
     missing: "No links to the scheme information document, KIM or monthly factsheet are stored.",
     proposal: "Store AMC document URLs per scheme → documents: [{ kind, url, as_of }]",
   },
-  lots: {
-    title: "Purchase lots",
-    missing:
-      "Top-ups are blended into one average NAV and keep the first purchase date, so holding period and tax are worked out per holding, not per lot (first in, first out).",
-    proposal: "Store each purchase as a lot: POST /v1/funds/holdings/{code}/lots",
-  },
+
 };

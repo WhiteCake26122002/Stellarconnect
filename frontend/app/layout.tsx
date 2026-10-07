@@ -1,6 +1,10 @@
 import type { Metadata } from "next";
 import { IBM_Plex_Mono, IBM_Plex_Sans } from "next/font/google";
+import { MotionEnhancer } from "@/components/MotionEnhancer";
+import { PageCurtain } from "@/components/PageCurtain";
 import "./globals.css";
+import "./polish.css";
+import "./interact.css";
 
 const sans = IBM_Plex_Sans({
   subsets: ["latin"],
@@ -30,6 +34,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           Skip to content
         </a>
         {children}
+        <PageCurtain />
+        <MotionEnhancer />
       </body>
     </html>
   );

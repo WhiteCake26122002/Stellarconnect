@@ -1,0 +1,149 @@
+/* The shared "desk" look: the Home page's language (tall condensed type, outlined echo lines, teal marks that draw
+   themselves, rows that rise in) applied to each module's landing screen. Working screens keep their own styles. */
+
+/* The app is black and white: the accent is ink. (The variable keeps its old name; Scenes and the desk pages read it.) */
+:root { --dk-teal: #131313; --dk-teal-dark: #131313; --dk-on: #ffffff; }
+
+.dk-hero {
+  --dk-ink: #131313;
+  --dk-muted: #5d6665;
+  --dk-line: #e4e8e7;
+  --dk-display: var(--font-display), "Oswald", "Arial Narrow", Impact, sans-serif;
+  --dk-mono: var(--font-mono), ui-monospace, monospace;
+  --dk-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+  position: relative;
+  isolation: isolate;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 24px clamp(24px, 4vw, 64px);
+  margin: 0 0 clamp(16px, 3vh, 28px);
+  padding: clamp(22px, 4.5vh, 44px) 0 clamp(20px, 3.5vh, 32px);
+  color: var(--dk-ink);
+}
+.dk-hero::before,
+.dk-hero::after { content: ""; position: absolute; width: 0; height: 0; border: 0 solid var(--dk-teal); pointer-events: none; animation: dk-corner 700ms 250ms var(--dk-ease) forwards; }
+.dk-hero::before { left: -8px; top: 6px; border-width: 2px 0 0 2px; }
+.dk-hero::after { right: -8px; top: 6px; border-width: 2px 2px 0 0; }
+.dk-main { flex: 1 1 380px; min-width: 0; }
+.dk-hero .dk-kick { margin: 0 0 clamp(8px, 1.6vh, 16px); display: flex; align-items: center; gap: 10px; font: 700 11px/1 var(--dk-mono); letter-spacing: 0.18em; text-transform: uppercase; color: var(--dk-muted); animation: dk-fade 700ms 80ms var(--dk-ease) both; }
+.dk-kick b { color: var(--dk-teal-dark); }
+.dk-kick b::after { content: ""; display: inline-block; width: 28px; height: 1px; margin: 0 0 3px 10px; background: var(--dk-teal); vertical-align: middle; transform-origin: left; animation: dk-draw 800ms 300ms var(--dk-ease) both; }
+.dk-hero .dk-echo, .dk-hero .dk-title { margin: 0; font: 800 clamp(2.8rem, 7.4vw, 6.6rem)/0.86 var(--dk-display); text-transform: uppercase; letter-spacing: 0; }
+.dk-hero .dk-echo { color: transparent; -webkit-text-stroke: clamp(1.5px, 0.16vw, 2.6px) var(--dk-ink); }
+.dk-echo, .dk-title { overflow: hidden; padding-bottom: 0.04em; }
+.dk-echo > span, .dk-title > span { display: block; animation: dk-line 900ms var(--dk-ease) both; }
+.dk-title > span { animation-delay: 120ms; }
+.desk .dk-title, .desk .dk-hero h1 { font-size: clamp(2.8rem, 7.4vw, 6.6rem); font-weight: 800; letter-spacing: 0; margin: 0; }
+.dk-hero.compact .dk-echo, .dk-hero.compact .dk-title, .desk .dk-hero.compact .dk-title { font-size: clamp(2.2rem, 5.2vw, 4.4rem); }
+.dk-hero .dk-lead { max-width: 52ch; margin: clamp(12px, 2vh, 20px) 0 0; font-size: clamp(0.95rem, 1.15vw, 1.05rem); line-height: 1.5; color: var(--dk-muted); animation: dk-fade 800ms 320ms var(--dk-ease) both; }
+.dk-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 18px; animation: dk-fade 800ms 420ms var(--dk-ease) both; }
+.dk-side { display: flex; align-items: flex-end; gap: clamp(18px, 3vw, 40px); animation: dk-fade 900ms 260ms var(--dk-ease) both; }
+.dk-stats { margin: 0; display: flex; gap: 0; }
+.dk-stats > div { padding: 2px clamp(14px, 2vw, 26px); border-left: 1px solid var(--dk-line); min-width: 0; }
+.dk-stats > div:first-child { padding-left: 0; border-left: 0; }
+.dk-hero .dk-stats dt { font: 600 10px/1.2 var(--dk-mono); letter-spacing: 0.14em; text-transform: uppercase; color: var(--dk-muted); }
+.dk-hero .dk-stats dd { margin: 6px 0 0; font: 800 clamp(1.7rem, 3vw, 2.7rem)/0.95 var(--dk-display); text-transform: uppercase; color: var(--dk-ink); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.dk-fig { position: relative; width: clamp(150px, 16vw, 230px); aspect-ratio: 4 / 3; color: var(--dk-ink); }
+.dk-fig svg { display: block; width: 100%; height: 100%; overflow: visible; transform: translate(calc(var(--mx, 0) * -7px), calc(var(--my, 0) * -5px)); transition: transform 700ms var(--dk-ease); animation: dk-wipe 1200ms 350ms var(--dk-ease) both; }
+.dk-fig::before, .dk-fig::after { transition: transform 700ms var(--dk-ease); transform: translate(calc(var(--mx, 0) * 6px), calc(var(--my, 0) * 4px)); }
+.dk-fig::before, .dk-fig::after { content: ""; position: absolute; width: 22px; height: 22px; border: 0 solid var(--dk-teal); }
+.dk-fig::before { left: -8px; top: -8px; border-width: 2px 0 0 2px; }
+.dk-fig::after { right: -8px; bottom: -8px; border-width: 0 2px 2px 0; }
+.dk-rule { position: absolute; left: 0; right: 0; bottom: 0; height: 1px; background: var(--dk-ink); opacity: 0.85; transform-origin: left; animation: dk-draw 1100ms 200ms var(--dk-ease) both; }
+
+/* rows and cards that rise in, one after another */
+.dk-in { animation: dk-rise 640ms var(--dk-ease, cubic-bezier(0.2, 0.8, 0.2, 1)) both; animation-delay: calc(min(var(--k, 0), 12) * 55ms + 160ms); }
+
+@keyframes dk-line { from { transform: translateY(105%); } to { transform: none; } }
+@keyframes dk-fade { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+@keyframes dk-draw { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+@keyframes dk-rise { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: none; } }
+@keyframes dk-wipe { from { clip-path: inset(-12px 100% -12px -12px); } to { clip-path: inset(-12px -12px -12px -12px); } }
+@keyframes dk-corner { to { width: 26px; height: 26px; } }
+
+/* ---------- the model list ---------- */
+.desk .dk-list { display: grid; gap: 10px; background: transparent; border: 0; padding: 0; }
+.desk .dk-list a.row {
+  position: relative; overflow: hidden; isolation: isolate;
+  padding: 18px 22px 18px 26px; border: 1px solid var(--line); border-radius: 6px; background: #fff;
+  transition: border-color 240ms var(--ease-out), transform 300ms var(--ease-out), box-shadow 300ms var(--ease-out);
+}
+.desk .dk-list a.row::before { content: ""; position: absolute; inset: 0; z-index: -1; background: color-mix(in srgb, var(--dk-teal) 12%, transparent); transform: scaleX(0); transform-origin: left; transition: transform 520ms var(--ease-out); }
+.desk .dk-list a.row::after { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 4px; background: var(--dk-teal); transform: scaleY(0); transform-origin: top; transition: transform 320ms var(--ease-out); }
+.desk .dk-list a.row:hover, .desk .dk-list a.row:focus-visible { background: #fff; border-color: #131313; transform: translateX(5px); box-shadow: 0 18px 36px -24px rgba(6, 6, 6, 0.45); }
+.desk .dk-list a.row:hover::before, .desk .dk-list a.row:focus-visible::before { transform: scaleX(1); }
+.desk .dk-list a.row:hover::after, .desk .dk-list a.row:focus-visible::after { transform: scaleY(1); }
+.desk .dk-list a.row strong { font-size: 1.05rem; letter-spacing: -0.01em; }
+
+.dk-find { display: flex; align-items: center; gap: 14px; margin: 0 0 14px; }
+.dk-find label { font: 700 11px/1 var(--font-mono), ui-monospace, monospace; letter-spacing: 0.16em; text-transform: uppercase; color: #5d6665; }
+.desk .dk-find input.filter { margin: 0; max-width: 22rem; background: transparent; border: 0; border-bottom: 1px solid #131313; border-radius: 0; padding: 8px 2px; font-family: var(--font-mono), ui-monospace, monospace; box-shadow: none; }
+.desk .dk-find input.filter:focus { border-bottom-color: var(--dk-teal); box-shadow: 0 1px 0 var(--dk-teal); }
+
+/* the empty state: a dashed frame with the desk's picture in it */
+.dk-empty { position: relative; display: grid; justify-items: center; gap: 6px; padding: clamp(36px, 7vh, 72px) 20px; text-align: center; border: 1px dashed #b9c3c1; border-radius: 6px; background: rgba(255, 255, 255, 0.7); animation: dk-rise 700ms 200ms var(--ease-out, cubic-bezier(0.2, 0.8, 0.2, 1)) both; color: #131313; }
+.dk-empty::before, .dk-empty::after { content: ""; position: absolute; width: 26px; height: 26px; border: 0 solid var(--dk-teal); }
+.dk-empty::before { left: -1px; top: -1px; border-width: 2px 0 0 2px; }
+.dk-empty::after { right: -1px; bottom: -1px; border-width: 0 2px 2px 0; }
+.dk-empty svg { width: clamp(150px, 20vw, 240px); height: auto; margin-bottom: 6px; }
+.desk .dk-empty h2 { margin: 0; font: 800 clamp(1.8rem, 3.4vw, 2.8rem)/0.95 var(--font-display), "Arial Narrow", Impact, sans-serif; text-transform: uppercase; letter-spacing: 0; }
+.dk-empty p { margin: 4px 0 14px; max-width: 44ch; }
+
+/* ---------- the pill buttons the desks share ---------- */
+.dk-pill, .desk a.dk-pill, .desk button.dk-pill { display: inline-flex; align-items: center; justify-content: center; gap: 8px; height: 40px; padding: 0 20px; border-radius: 999px; border: 1px solid #131313; background: #131313; color: #fff; cursor: pointer; text-decoration: none; font: 700 12px/1 var(--font-mono), ui-monospace, monospace; letter-spacing: 0.1em; text-transform: uppercase; transition: transform 160ms var(--ease-out), background 160ms, color 160ms, border-color 160ms; }
+.dk-pill:hover, .desk a.dk-pill:hover, .desk button.dk-pill:hover { background: #3b3f3f; border-color: #3b3f3f; color: #fff; transform: translateY(-1px); }
+.dk-pill.ghost, .desk a.dk-pill.ghost, .desk button.dk-pill.ghost { background: transparent; color: #131313; }
+.dk-pill.ghost:hover, .desk a.dk-pill.ghost:hover, .desk button.dk-pill.ghost:hover { background: #131313; border-color: #131313; color: #fff; }
+
+/* ---------- new model: numbered steps ---------- */
+.dk-step { position: relative; }
+.desk .dk-step > h2 { display: flex; align-items: baseline; gap: 14px; font: 800 clamp(1.6rem, 2.6vw, 2.2rem)/1 var(--font-display), "Arial Narrow", Impact, sans-serif; text-transform: uppercase; letter-spacing: 0; }
+.dk-step > h2 b { font: 700 12px/1 var(--font-mono), ui-monospace, monospace; letter-spacing: 0.16em; color: var(--dk-teal-dark); }
+.desk .dk-step.card.card { padding: 22px 0 6px; }
+.desk .dk-step + .dk-step { border-top: 1px solid #131313; }
+.desk details.dk-step > summary strong { font: 800 clamp(1.6rem, 2.6vw, 2.2rem)/1 var(--font-display), "Arial Narrow", Impact, sans-serif; text-transform: uppercase; letter-spacing: 0; }
+.desk details.dk-step > summary > b { margin-right: 14px; font: 700 12px/1 var(--font-mono), ui-monospace, monospace; letter-spacing: 0.16em; color: var(--dk-teal-dark); }
+
+/* page headings inside the desks pick up the display face too */
+.desk .page-head h1 { font-family: var(--font-display), "Arial Narrow", Impact, sans-serif; text-transform: uppercase; font-weight: 800; letter-spacing: 0; font-size: clamp(2rem, 3.4vw, 3rem); line-height: 0.95; }
+
+/* ---------- choose a desk ---------- */
+.dk-choose { min-height: 100svh; background: #f7f8f7; padding: clamp(18px, 3vw, 36px) clamp(16px, 3vw, 40px) clamp(40px, 8vh, 80px); }
+.dk-choose .dk-hero { max-width: 1440px; margin-left: auto; margin-right: auto; }
+.dk-choose .cn-desks { padding: 0; background: transparent; max-width: 1440px; margin: 0 auto; --rise: 1; }
+.dk-choose .cn-desks::before { display: none; }
+
+/* ---------- small screens ---------- */
+@media (max-width: 900px) {
+  .dk-fig { display: none; }
+  .dk-side { width: 100%; }
+  .dk-stats { flex-wrap: wrap; row-gap: 14px; }
+  .desk .dk-list a.row { padding: 16px 16px 16px 20px; }
+  .dk-find { flex-wrap: wrap; gap: 6px 14px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dk-hero *, .dk-hero::before, .dk-hero::after, .dk-in, .dk-empty { animation: none !important; transition: none !important; }
+  .dk-hero::before, .dk-hero::after { width: 26px; height: 26px; }
+}
+
+/* the rooms on Choose a desk rise in one after another (the lean on hover still works: only translate and opacity animate) */
+@keyframes dk-room-in { from { opacity: 0; translate: 0 48px; } to { opacity: 1; translate: 0 0; } }
+.dk-choose .cn-room { animation: dk-room-in 800ms cubic-bezier(0.2, 0.8, 0.2, 1) backwards; animation-delay: calc(450ms + var(--k, 0) * 140ms); }
+
+/* ---------- the model list: sorting and the upside bar ---------- */
+.dk-sort { display: inline-flex; gap: 6px; margin-left: auto; }
+.desk .dk-sort button { height: 30px; padding: 0 14px; border-radius: 999px; border: 1px solid #cecece; background: transparent; color: #131313; cursor: pointer; font: 700 11px/1 var(--font-mono), ui-monospace, monospace; letter-spacing: 0.1em; text-transform: uppercase; transition: background 160ms, color 160ms, border-color 160ms; }
+.desk .dk-sort button:hover { border-color: #131313; }
+.desk .dk-sort button[aria-pressed="true"] { background: #131313; border-color: #131313; color: #fff; }
+.dk-up { display: grid; gap: 6px; justify-items: end; min-width: 120px; }
+.dk-bar { position: relative; width: 120px; height: 6px; border-radius: 3px; background: rgba(19, 19, 19, 0.08); overflow: hidden; }
+.dk-bar i { position: absolute; top: 0; bottom: 0; background: var(--dk-teal); transition: width 700ms var(--ease-out); }
+.dk-bar i.pos { left: 50%; }
+.dk-bar i.neg { right: 50%; background: #d84e61; }
+.dk-bar::after { content: ""; position: absolute; left: 50%; top: 0; bottom: 0; width: 1px; background: rgba(19, 19, 19, 0.35); }
+.dk-in .dk-bar i { animation: dk-bar-grow 900ms calc(var(--k, 0) * 55ms + 500ms) var(--ease-out) both; }
+@keyframes dk-bar-grow { from { width: 0; } }
+@media (prefers-reduced-motion: reduce) { .dk-choose .cn-room, .dk-fig svg, .dk-in .dk-bar i { animation: none !important; } .dk-fig svg { transform: none; } }

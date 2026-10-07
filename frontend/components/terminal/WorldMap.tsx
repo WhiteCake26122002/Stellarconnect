@@ -9,7 +9,7 @@ import { COUNTRY_SHAPES, WORLD_VIEW } from "@/lib/trading/world-geo";
 import { WORLD_MARKETS } from "@/lib/trading/world-markets";
 import type { Quote } from "@/lib/trading/types";
 
-const MUTED = "#2a1c10";
+const MUTED = "#1d1d1d";
 
 type LiveRow = {
   symbol: string;

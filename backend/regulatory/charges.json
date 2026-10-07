@@ -1,0 +1,191 @@
+{
+  "schemaVersion": 1,
+  "reviewedOn": "2026-10-05",
+  "currency": "INR",
+  "about": "Central transaction-charge configuration. Every rate is a percentage of the stated base unless the field says otherwise, and every rate is a dated schedule: the entry with the latest `from` on or before the trade date applies. Nothing else in the application holds a charge rate. frontend/lib/regulatory/charges.json is a byte-for-byte mirror; a test fails if they drift.",
+  "disclaimer": "Charges are simulated and may differ from your actual broker.",
+  "sources": [
+    { "id": "stt-budget-2026", "title": "Union Budget 2026-27: STT on futures raised to 0.05% and on options to 0.15% from 1 Apr 2026; equity delivery and intraday unchanged", "url": "https://cleartax.in/s/securities-transaction-tax-stt" },
+    { "id": "nse-charges-2026-03", "title": "NSE circular 27 Feb 2026: transaction charges revised from 1 Mar 2026 as the IPFT contribution was rolled back, overall outflow unchanged", "url": "https://www.teamleaseregtech.com/updates/article/53156/nse-issued-a-circular-regarding-the-revision-in-transaction-charges/" },
+    { "id": "broker-schedule", "title": "Published broker schedule of exchange, SEBI, stamp-duty and GST charges", "url": "https://www.angelone.in/exchange-transaction-charges" },
+    { "id": "sebi-mf-2025-08", "title": "SEBI circular 8 Aug 2025: transaction charges payable to mutual fund distributors discontinued", "url": "https://www.business-standard.com/markets/mutual-fund/sebi-scraps-transaction-charges-for-mf-distributors-effective-immediately-125080900914_1.html" }
+  ],
+
+  "rounding": {
+    "default": "paise",
+    "stt": "rupee",
+    "note": "Components are rounded to the paisa; STT is rounded to the nearest rupee, as on a contract note. The total is the sum of the rounded components."
+  },
+
+  "gst": {
+    "ratePct": [{ "from": "2017-07-01", "pct": 18 }],
+    "appliesTo": ["brokerage", "exchange", "sebi", "other"],
+    "note": "GST applies to brokerage, exchange transaction charges (including IPFT), SEBI turnover fees and depository charges. It is not charged on STT or stamp duty, and never on the trade value."
+  },
+
+  "sebi": {
+    "ratePct": [{ "from": "2018-01-01", "pct": 0.0001 }],
+    "note": "Rs 10 per crore of turnover, on both sides, in every segment."
+  },
+
+  "exchangeCharges": {
+    "note": "All-in exchange transaction charge, as a percentage of turnover (premium for options). NSE entries are the transaction charge plus the Investor Protection Fund Trust (IPFT) contribution; the 1 Mar 2026 revision moved most of the IPFT amount into the transaction charge and left the total unchanged.",
+    "NSE": {
+      "equity": [
+        { "from": "2024-10-01", "pct": 0.00307, "parts": { "transaction": 0.00297, "ipft": 0.0001 } },
+        { "from": "2026-03-01", "pct": 0.00307, "parts": { "transaction": 0.0030699, "ipft": 0.0000001 } }
+      ],
+      "futures": [
+        { "from": "2024-10-01", "pct": 0.00183, "parts": { "transaction": 0.00173, "ipft": 0.0001 } },
+        { "from": "2026-03-01", "pct": 0.00183, "parts": { "transaction": 0.0018299, "ipft": 0.0000001 } }
+      ],
+      "options": [
+        { "from": "2024-10-01", "pct": 0.03553, "parts": { "transaction": 0.03503, "ipft": 0.0005 } },
+        { "from": "2026-03-01", "pct": 0.03553, "parts": { "transaction": 0.0355299, "ipft": 0.0000001 } }
+      ]
+    },
+    "BSE": {
+      "equity": [{ "from": "2024-10-01", "pct": 0.00375, "note": "Common rate for A and B group scrips. BSE varies this by scrip group." }],
+      "futures": [{ "from": "2024-10-01", "pct": 0 }],
+      "options": [{ "from": "2024-10-01", "pct": 0.0325, "note": "Sensex and Bankex index options, on premium." }]
+    }
+  },
+
+  "stampDuty": {
+    "note": "Buy side only, as a percentage of the buy value (premium for options). Rates are set by the Indian Stamp Act and differ by transaction type; they are not one rate for every trade.",
+    "equityDelivery": { "buy": [{ "from": "2020-07-01", "pct": 0.015 }], "sell": [{ "from": "2020-07-01", "pct": 0 }] },
+    "equityIntraday": { "buy": [{ "from": "2020-07-01", "pct": 0.003 }], "sell": [{ "from": "2020-07-01", "pct": 0 }] },
+    "futures": { "buy": [{ "from": "2020-07-01", "pct": 0.002 }], "sell": [{ "from": "2020-07-01", "pct": 0 }] },
+    "options": { "buy": [{ "from": "2020-07-01", "pct": 0.003 }], "sell": [{ "from": "2020-07-01", "pct": 0 }] }
+  },
+
+  "equityDelivery": {
+    "label": "Equity delivery",
+    "exchangeSegment": "equity",
+    "stt": {
+      "buy": [{ "from": "2004-10-01", "pct": 0.1 }],
+      "sell": [{ "from": "2004-10-01", "pct": 0.1 }]
+    }
+  },
+  "equityIntraday": {
+    "label": "Equity intraday",
+    "exchangeSegment": "equity",
+    "stt": {
+      "buy": [{ "from": "2013-10-01", "pct": 0 }],
+      "sell": [{ "from": "2013-10-01", "pct": 0.025 }]
+    }
+  },
+  "futures": {
+    "label": "Futures",
+    "exchangeSegment": "futures",
+    "stt": {
+      "buy": [{ "from": "2013-10-01", "pct": 0 }],
+      "sell": [
+        { "from": "2024-10-01", "pct": 0.02 },
+        { "from": "2026-04-01", "pct": 0.05 }
+      ]
+    }
+  },
+  "options": {
+    "label": "Options",
+    "exchangeSegment": "options",
+    "stt": {
+      "buy": [{ "from": "2013-10-01", "pct": 0 }],
+      "sell": [
+        { "from": "2024-10-01", "pct": 0.1 },
+        { "from": "2026-04-01", "pct": 0.15 }
+      ]
+    },
+    "note": "STT is on the option premium, sell side. Exercise-time STT is not simulated."
+  },
+
+  "depository": {
+    "note": "Depository (DP) charge: a per-scrip, per-day fee on delivery sells. It is a broker setting, not a regulation, so it lives in the broker profile.",
+    "appliesTo": ["equityDelivery"]
+  },
+
+  "mutualFunds": {
+    "stampDuty": {
+      "ratePct": [
+        { "from": "1900-01-01", "pct": 0 },
+        { "from": "2020-07-01", "pct": 0.005 }
+      ],
+      "appliesTo": ["purchase", "sip", "switchIn", "dividendReinvestment"],
+      "treatment": "deducted_from_units",
+      "note": "0.005% of the purchase amount. It is taken out of the money invested, so the units allotted are (amount - duty) / NAV. It is not charged again on redemption. Transfer of units (demat, off-market) is treated differently and is not simulated."
+    },
+    "sttOnRedemption": {
+      "equityOriented": [{ "from": "2004-10-01", "pct": 0.001 }],
+      "other": [{ "from": "2004-10-01", "pct": 0 }],
+      "note": "STT of 0.001% is deducted by the AMC on redemption of equity-oriented fund units. It is not an allowable deduction when computing the capital gain."
+    },
+    "distributorTransactionCharge": {
+      "status": "discontinued",
+      "since": "2025-08-08",
+      "amount": 0,
+      "note": "The Rs 100 / Rs 150 transaction charge once deducted from the first-time and repeat investor's subscription was discontinued by SEBI on 8 Aug 2025. The simulator charges nothing for it."
+    },
+    "expenseRatio": {
+      "treatment": "already_in_nav",
+      "note": "The expense ratio is charged inside the fund and is already reflected in the NAV. It is not a transaction charge and is never deducted from your returns a second time."
+    },
+    "exitLoad": {
+      "treatment": "user_supplied",
+      "note": "Exit load is set by each scheme and changes over time. No free, dependable source publishes it, so the simulator uses a value you enter from the scheme information document and says so when none is entered."
+    }
+  },
+
+  "instrumentMap": {
+    "note": "How each simulated instrument is charged. An index quote is not directly tradable in India, so a domestic index position is charged as the nearest tradable form, a future. Instruments with no Indian schedule modelled are listed under `unmodelled` and carry no charges.",
+    "stock": "equity",
+    "etf": "equity",
+    "index": "futures",
+    "future": "futures",
+    "option": "options",
+    "unmodelled": ["commodity", "forex", "crypto"],
+    "unmodelledExchanges": ["GLOBAL", "MCX", "FX", "CRYPTO"]
+  },
+
+  "brokerProfiles": {
+    "default": "default-simulator",
+    "profiles": {
+      "default-simulator": {
+        "label": "Default Simulator",
+        "description": "A traditional broker: a percentage brokerage on delivery, a capped percentage on intraday, flat per order on F&O.",
+        "equityDelivery": { "pct": 0.2 },
+        "equityIntraday": { "pct": 0.03, "cap": 20 },
+        "futures": { "flat": 20 },
+        "options": { "flat": 20 },
+        "dpChargePerScripSell": 13
+      },
+      "discount-flat": {
+        "label": "Discount broker",
+        "description": "Free equity delivery; intraday 0.03% or Rs 20 per order, whichever is lower; Rs 20 per order on F&O.",
+        "equityDelivery": { "flat": 0 },
+        "equityIntraday": { "pct": 0.03, "cap": 20 },
+        "futures": { "flat": 20 },
+        "options": { "flat": 20 },
+        "dpChargePerScripSell": 13
+      },
+      "full-service": {
+        "label": "Full-service broker",
+        "description": "Higher percentage brokerage with a per-order minimum.",
+        "equityDelivery": { "pct": 0.5, "min": 20 },
+        "equityIntraday": { "pct": 0.05, "min": 20 },
+        "futures": { "pct": 0.05, "min": 20 },
+        "options": { "flat": 50 },
+        "dpChargePerScripSell": 18.5
+      },
+      "custom": {
+        "label": "Custom",
+        "description": "Your own brokerage numbers. Statutory charges stay as above.",
+        "equityDelivery": { "pct": 0.2 },
+        "equityIntraday": { "pct": 0.03, "cap": 20 },
+        "futures": { "flat": 20 },
+        "options": { "flat": 20 },
+        "dpChargePerScripSell": 13
+      }
+    },
+    "brokerageShape": "pct: percentage of turnover. flat: rupees per executed order. cap: ceiling on the calculated amount. min: floor on the calculated amount. If both pct and flat are given, pct wins."
+  }
+}

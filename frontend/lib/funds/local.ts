@@ -244,10 +244,11 @@ function writeFlag(name: string, value: string | null) {
   emit();
 }
 
-export type FundView = "cards" | "table";
+export type FundView = "list" | "cards" | "table";
 
 export function useFundView(): FundView {
-  return useFlag("view") === "table" ? "table" : "cards";
+  const v = useFlag("view");
+  return v === "table" ? "table" : v === "cards" ? "cards" : "list";
 }
 
 export function setFundView(view: FundView) {
@@ -266,4 +267,46 @@ export function useAnalyticsTourDone(): boolean | null {
 
 export function setAnalyticsTourDone(done: boolean) {
   writeFlag("analyticsTour", done ? new Date().toISOString() : null);
+}
+
+// ---- Investor profile ---------------------------------------------------------------------------
+
+export type InvestorProfile = { age?: string; horizon?: string; risk?: string; objective?: string };
+
+const NO_PROFILE: InvestorProfile = Object.freeze({});
+
+/** Optional context for the Insights tab. Kept in this browser, per account, and sent only as query parameters. */
+function readProfile(): InvestorProfile {
+  const key = keyFor("profile", true);
+  if (!key) return NO_PROFILE;
+  const raw = readRaw(key);
+  const hit = cache.get(key);
+  if (hit && hit.raw === raw) return hit.value as InvestorProfile;
+  let value: InvestorProfile = NO_PROFILE;
+  try {
+    const parsed = raw ? JSON.parse(raw) : null;
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) value = parsed as InvestorProfile;
+  } catch {
+    value = NO_PROFILE;
+  }
+  cache.set(key, { raw, value });
+  return value;
+}
+
+export function useInvestorProfile(): InvestorProfile {
+  return useSyncExternalStore(subscribe, readProfile, () => NO_PROFILE);
+}
+
+export function setInvestorProfile(patch: InvestorProfile) {
+  const key = keyFor("profile", true);
+  if (!key) return;
+  const next: InvestorProfile = { ...readProfile(), ...patch };
+  for (const k of Object.keys(next) as (keyof InvestorProfile)[]) if (!next[k]) delete next[k];
+  try {
+    if (Object.keys(next).length) window.localStorage.setItem(key, JSON.stringify(next));
+    else window.localStorage.removeItem(key);
+  } catch {
+    /* private mode or quota */
+  }
+  emit();
 }

@@ -13,6 +13,9 @@ export async function registerAccount(
   await page.getByLabel("Password (8+ characters)").fill("password1");
   await page.getByLabel("Confirm password").fill("password1");
   await page.getByRole("button", { name: "Create account" }).click();
+  // A new account is greeted, then lands on Home; most specs then want the desk chooser's links.
+  await page.waitForURL((u) => u.pathname === "/", { timeout: 30_000 });
+  await page.goto("/choose");
   await expect(page.getByRole("heading", { name: "Choose a desk" })).toBeVisible({ timeout: 30_000 });
   return email;
 }

@@ -32,6 +32,23 @@ def _ensure_user_profile_columns(engine) -> None:
                 conn.execute(text(f"ALTER TABLE users ADD COLUMN IF NOT EXISTS {name} {spec}"))
 
 
+def _ensure_mf_transaction_columns(engine) -> None:
+    """Add the redemption-charge columns on existing databases. create_all will not ALTER."""
+    insp = inspect(engine)
+    if not insp.has_table("mf_transactions"):
+        return
+    existing = {col["name"] for col in insp.get_columns("mf_transactions")}
+    dialect = engine.dialect.name
+    with engine.begin() as conn:
+        for name in ("exit_load", "stt"):
+            if name in existing:
+                continue
+            if dialect == "sqlite":
+                conn.execute(text(f"ALTER TABLE mf_transactions ADD COLUMN {name} FLOAT"))
+            else:
+                conn.execute(text(f"ALTER TABLE mf_transactions ADD COLUMN IF NOT EXISTS {name} DOUBLE PRECISION"))
+
+
 def get_engine():
     global _engine, _SessionLocal
     if _engine is None:
@@ -39,6 +56,7 @@ def get_engine():
         _engine = make_engine(settings.database_url)
         Base.metadata.create_all(_engine)
         _ensure_user_profile_columns(_engine)
+        _ensure_mf_transaction_columns(_engine)
         _SessionLocal = make_session_factory(_engine)
     return _engine
 

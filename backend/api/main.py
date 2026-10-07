@@ -1,9 +1,15 @@
 from __future__ import annotations
 
+import os
+import threading
+
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import ValidationError
+
+from backend.trading.yahoo_feed import warm_cache
 
 from .config import get_settings
 from .db import get_engine
@@ -14,6 +20,8 @@ from .routers import auth, companies, funds, market, models
 def create_app() -> FastAPI:
     settings = get_settings()
     app = FastAPI(title="Connect", version="1.0.0")
+    # Candle and universe payloads are large, repetitive JSON: compressing them is most of the difference on a slow link.
+    app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=5)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origin_list,
@@ -25,6 +33,8 @@ def create_app() -> FastAPI:
     @app.on_event("startup")
     def _startup():
         get_engine()
+        if not os.environ.get("PYTEST_CURRENT_TEST"):
+            threading.Thread(target=warm_cache, name="market-warmup", daemon=True).start()
 
     @app.get("/health")
     def health():

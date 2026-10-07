@@ -1,9 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { FormEvent, useEffect, useRef, useState } from "react";
+import { CSSProperties, FormEvent, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { AppShell } from "@/components/AppShell";
+import { DeskHero } from "@/components/desk/DeskHero";
 import { ApiError, api } from "@/lib/api";
 
 type SearchHit = {
@@ -273,13 +274,19 @@ export default function NewModelPage() {
 
   return (
     <AppShell>
-      <main id="main" className="shell narrow">
+      <main id="main" className="shell" style={{ maxWidth: 920 }}>
         <p className="crumb">
           <Link href="/models">Models</Link>
           <span className="muted"> / New</span>
         </p>
-        <h1>New model</h1>
-        <p className="muted">Start from a live ticker. The sample is for learning the desk. Paste a snapshot only if the company is not listed.</p>
+        <DeskHero
+          compact
+          n="02"
+          kicker="Valuation · step by step"
+          echo="Start a"
+          title="New model"
+          lead="Start from a live ticker. The sample is for learning the desk. Paste a snapshot only if the company is not listed."
+        />
         {error ? <div className="banner bad">{error}</div> : null}
         {status ? <div className="banner ok">{status}</div> : null}
 
@@ -316,8 +323,10 @@ export default function NewModelPage() {
           </section>
         ) : null}
 
-        <section className="card" style={{ marginBottom: "1rem" }}>
-          <h2>Live company</h2>
+        <section className="card dk-step dk-in" style={{ marginBottom: "1rem", "--k": 0 } as CSSProperties}>
+          <h2>
+            <b>01</b>Live company
+          </h2>
           <p className="note">
             Type at least two characters. A bare ticker like INFY is the US ADR (USD). India listings use .NS (INR).
           </p>
@@ -356,16 +365,19 @@ export default function NewModelPage() {
           </div>
         </section>
 
-        <section className="card" style={{ marginBottom: "1rem" }}>
-          <h2>Sample</h2>
+        <section className="card dk-step dk-in" style={{ marginBottom: "1rem", "--k": 1 } as CSSProperties}>
+          <h2>
+            <b>02</b>Sample
+          </h2>
           <p className="muted">Orion Cloud Systems (ORCS) — fictional, so you can learn the workspace without a market feed.</p>
           <button type="button" className="btn secondary" disabled={pending} onClick={createSample}>
             Open sample model
           </button>
         </section>
 
-        <details className="card">
+        <details className="card dk-step dk-in" style={{ "--k": 2 } as CSSProperties}>
           <summary>
+            <b>03</b>
             <strong>Paste a snapshot</strong>
             <span className="note summary-note">Up to three fiscal years. Blank lines stay unavailable — they are not stored as verified zeros.</span>
           </summary>

@@ -1,5 +1,6 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -14,49 +15,78 @@ import { api } from "@/lib/api";
 import {
   closePosition,
   equity,
-  execPrice,
   historyFilter,
-  invested,
-  matchPending,
-  modifyPosition,
-  placeOrder,
+  fillsToCsv,
   resetAccount,
-  stats,
+  rolloverDay,
   toCsv,
   unrealized,
 } from "@/lib/trading/engine";
+import { allPriced, calculateHoldings, calculateSummary, recordEquity } from "@/lib/trading/analytics";
+import { checkTicket, parseQty } from "@/lib/trading/orderFlow";
+import { brokerProfileList } from "@/lib/costs/charges";
+import { CHARGES } from "@/lib/costs/rules";
+import { CostDisclosure } from "@/components/costs/CostDisclosure";
+import { TaxProfileForm } from "@/components/costs/TaxProfileForm";
+import { useTaxProfile } from "@/components/costs/useTaxProfile";
+import * as candleCache from "@/lib/trading/candleCache";
 import { catalogEntry, createIndicator, formatIndicatorValue, INDICATOR_CATALOG, latestIndicatorValues } from "@/lib/trading/indicators";
 import { applyLiveLast, applyTick, candlesFor, depthLadder, quoteFromCandles, quoteFromLive, seedKey } from "@/lib/trading/market";
 import { cloneDrawings, cloneIndicators, defaultSlots, loadPersist, PersistShape, savePersist } from "@/lib/trading/persist";
-import { dur, inr, pct, px, signedInr, signedPx, vol } from "@/lib/trading/format";
+import { dur, inr, pct, px, signedInr, signedPx } from "@/lib/trading/format";
 import type {
   Alert,
   Candle,
   ChartType,
   Drawing,
   DrawingKind,
+  FeeConfig,
   IndicatorInstance,
   Quote,
   Side,
-  Trade,
 } from "@/lib/trading/types";
 import { CLASS_LABEL, NSE_INDEX_FILTERS, equityCount, findSymbol, indexSymbols, isPlaceholderSymbol, registerEquities, searchSymbols, TIMEFRAMES, UNIVERSE } from "@/lib/trading/universe";
 import { ChartCanvas, ChartHandle, ScaleMode } from "./ChartCanvas";
+import { LedgerPane } from "./LedgerPane";
+import { createHoverStore, OhlcLegend } from "./OhlcLegend";
 import { DeskNav, DeskView } from "./DeskNav";
-import { FinancialsPane } from "./FinancialsPane";
-import { HeatMap } from "./HeatMap";
-import { LevelField } from "./LevelField";
-import { PortfolioBoard } from "./PortfolioBoard";
 import { DeskMark } from "./DeskMark";
 import { PositionPie } from "./PositionPie";
-import { Confetti, PnlHistoryChart, PnlSpark, PracticeStrip } from "./PnlCharts";
-import { TradeTicket, TicketValues } from "./TradeTicket";
-import { positionSeries, usePnlSession, type PnlEvent } from "./usePnlSession";
-import { WorldMap } from "./WorldMap";
+import { Confetti } from "./PnlCharts";
+import { OrderConfirmation, OrderFailure, OrderSuccess } from "./paper/OrderDialogs";
+import { OrderSheet, OrderTicket } from "./paper/OrderTicket";
+import { useOrderFlow } from "./paper/useOrderFlow";
+import { useMinWidth, EmptyState } from "./paper/ui";
+import { JournalPanel } from "./paper/JournalPanel";
+import { PaperHome } from "./paper/PaperHome";
+import { PortfolioAnalytics } from "./paper/PortfolioAnalytics";
+import { PositionsTable } from "./paper/PositionsTable";
+import { useCloses } from "./paper/useCloses";
+import { usePnlSession, type PnlEvent } from "./usePnlSession";
 import { AnimatedNumber } from "@/components/AnimatedNumber";
 import { AppSwitch } from "@/components/AppSwitch";
 import { ConnectLogo } from "@/components/ConnectLogo";
 import { withViewTransition } from "@/lib/motion";
+
+// Boards that are not the chart load when first opened, which keeps the chart's first paint light.
+const board = (label: string) => () => <div className="board-page" aria-busy="true" aria-label={`Opening ${label}`}><span className="skel skel-line" style={{ width: "12rem", height: "1.4rem" }} /></div>;
+const HeatMap = dynamic(() => import("./HeatMap").then((m) => m.HeatMap), { ssr: false, loading: board("heat map") });
+const WorldMap = dynamic(() => import("./WorldMap").then((m) => m.WorldMap), { ssr: false, loading: board("world map") });
+const PortfolioBoard = dynamic(() => import("./PortfolioBoard").then((m) => m.PortfolioBoard), { ssr: false, loading: board("portfolio") });
+const CapitalGainsBoard = dynamic(() => import("./CapitalGainsBoard").then((m) => m.CapitalGainsBoard), { ssr: false, loading: board("capital gains") });
+const FinancialsPane = dynamic(() => import("./FinancialsPane").then((m) => m.FinancialsPane), { ssr: false, loading: board("financials") });
+
+const DAY = 86_400_000;
+/** How far back the chart looks. These zoom the chart; the Timeframe button next to them sets the size of each bar. */
+const RANGE_CHIPS: { id: string; ms: number | null }[] = [
+  { id: "1D", ms: DAY },
+  { id: "1W", ms: 7 * DAY },
+  { id: "1M", ms: 30 * DAY },
+  { id: "3M", ms: 91 * DAY },
+  { id: "6M", ms: 182 * DAY },
+  { id: "1Y", ms: 365 * DAY },
+  { id: "5Y", ms: 5 * 365 * DAY },
+];
 
 const CHART_TYPES: { id: ChartType; label: string }[] = [
   { id: "candles", label: "Candles" },
@@ -114,22 +144,32 @@ function unitWord(symbol: string, qty: number) {
 export function Terminal({ userId, name }: { userId: string; name: string }) {
   const router = useRouter();
   const [store, setStore] = useState<PersistShape>(() => loadPersist(userId));
-  const [slot, setSlot] = useState(0);
+  const [slot] = useState(0);
   const [indicators, setIndicators] = useState<IndicatorInstance[]>([
     createIndicator("volume", 0),
   ]);
   const [drawings, setDrawings] = useState<Drawing[]>([]);
   const [tool, setTool] = useState<DrawingKind | "cursor" | "crosshair">("crosshair");
   const [selected, setSelected] = useState<{ id: string; kind: "drawing" | "indicator" | "position" } | null>(null);
-  const [right, setRight] = useState<"watchlist" | "details" | "trade">("watchlist");
-  const [bottomTab, setBottomTab] = useState<"positions" | "orders" | "history" | "portfolio" | "journal" | "account">("positions");
+  const [right, setRight] = useState<"watchlist" | "details" | "trade">("trade");
+  const [bottomTab, setBottomTab] = useState<"positions" | "orders" | "history" | "analytics" | "journal">("positions");
+  const [quotesTry, setQuotesTry] = useState(0);
+  const [chartRange, setChartRange] = useState<string | null>(null);
+  const [histView, setHistView] = useState<"transactions" | "trades" | "charges">("transactions");
+  const [allocHover, setAllocHover] = useState<string | null>(null);
+  const [taxProfile, setTaxProfile] = useTaxProfile(userId);
   const [journalId, setJournalId] = useState<string | null>(null);
   const [overlay, setOverlay] = useState<Overlay>(null);
   const [drawGroup, setDrawGroup] = useState<string | null>(null);
   const [ctx, setCtx] = useState<{ x: number; y: number } | null>(null);
   const [scaleMode, setScaleMode] = useState<ScaleMode>("linear");
-  const [hover, setHover] = useState<{ o: number; h: number; l: number; c: number; v: number; t: number } | null>(null);
-  const [confirm, setConfirm] = useState<null | { kind: "order"; values: TicketValues } | { kind: "close"; id: string }>(null);
+  // The bar under the crosshair lives outside React state so moving the mouse never re-renders the terminal.
+  const hoverStore = useMemo(() => createHoverStore(), []);
+  // The name, price and OHLC rows float over the chart, so the plot starts below them instead of under the text.
+  const headRef = useRef<HTMLDivElement>(null);
+  const [headInset, setHeadInset] = useState(46);
+  // Only a position left over from before the desk was long-only is closed through this dialog; every other exit is a sell on the ticket.
+  const [confirm, setConfirm] = useState<null | { kind: "close"; id: string }>(null);
   const [toasts, setToasts] = useState<ToastItem[]>([]);
   const [burst, setBurst] = useState(0);
   const [cheer, setCheer] = useState(false);
@@ -142,10 +182,23 @@ export function Terminal({ userId, name }: { userId: string; name: string }) {
   const [wlQ, setWlQ] = useState("");
   const [settingsTab, setSettingsTab] = useState("Chart");
   const [indEdit, setIndEdit] = useState<string | null>(null);
-  const [mobile, setMobile] = useState<"chart" | "markets" | "trade" | "positions" | "portfolio">("chart");
   const [histRange, setHistRange] = useState<"today" | "week" | "month" | "all">("all");
-  const [ticketSide, setTicketSide] = useState<Side>("buy");
   const [deskView, setDeskView] = useState<DeskView>("chart");
+  useEffect(() => {
+    const head = headRef.current;
+    const stage = head?.parentElement;
+    if (!head || !stage) return;
+    const measure = () => {
+      const legend = head.querySelector<HTMLElement>(".term-ohlc") ?? head.querySelector<HTMLElement>(".term-legend-row");
+      if (!legend) return;
+      const next = Math.max(0, Math.round(legend.getBoundingClientRect().bottom - stage.getBoundingClientRect().top));
+      setHeadInset((cur) => (Math.abs(cur - next) > 1 ? next : cur));
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(head);
+    return () => ro.disconnect();
+  }, [deskView]);
   const [candlesMap, setCandlesMap] = useState<Map<string, Candle[]>>(() => new Map());
   const [quotes, setQuotes] = useState<Map<string, Quote>>(() => new Map());
   const [quotesLoading, setQuotesLoading] = useState(false);
@@ -191,23 +244,33 @@ export function Terminal({ userId, name }: { userId: string; name: string }) {
     redo.current = [];
   };
 
+  // Simulated bars are only a fallback for a feed that does not answer. Painting them first and swapping in the
+  // real ones a moment later made the chart and the watchlist visibly jump, so they wait for the feed to fail or stall.
   useEffect(() => {
-    const next = new Map(candlesMap);
-    for (const s of store.slots.slice(0, store.chartCount)) {
-      const k = seedKey(s.symbol, s.timeframe);
-      if (!next.has(k)) next.set(k, candlesFor(s.symbol, s.timeframe));
-    }
-    for (const s of UNIVERSE) {
-      const k = seedKey(s.symbol, "1D");
-      if (!next.has(k)) next.set(k, candlesFor(s.symbol, "1D", 400));
-    }
-    setCandlesMap(next);
-    const qm = new Map<string, Quote>();
-    for (const s of UNIVERSE) {
-      const c = next.get(seedKey(s.symbol, "1D")) || [];
-      if (c.length) qm.set(s.symbol, quoteFromCandles(s.symbol, c));
-    }
-    setQuotes(qm);
+    const id = window.setTimeout(() => {
+      setCandlesMap((cur) => {
+        const next = new Map(cur);
+        for (const s of store.slots.slice(0, store.chartCount)) {
+          const k = seedKey(s.symbol, s.timeframe);
+          if (!next.has(k)) next.set(k, candlesFor(s.symbol, s.timeframe));
+        }
+        for (const s of UNIVERSE) {
+          const k = seedKey(s.symbol, "1D");
+          if (!next.has(k)) next.set(k, candlesFor(s.symbol, "1D", 400));
+        }
+        return next;
+      });
+      setQuotes((cur) => {
+        const next = new Map(cur);
+        for (const s of UNIVERSE) {
+          if (next.has(s.symbol)) continue;
+          const c = candlesFor(s.symbol, "1D", 400);
+          if (c.length) next.set(s.symbol, quoteFromCandles(s.symbol, c));
+        }
+        return next;
+      });
+    }, 3500);
+    return () => window.clearTimeout(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -241,37 +304,61 @@ export function Terminal({ userId, name }: { userId: string; name: string }) {
     return () => ac.abort();
   }, [setStore]);
 
+  // Saving serialises the whole desk (watchlists, drawings, ledger); do it once things settle, and again as the tab closes.
+  const latestStore = useRef(store);
+  latestStore.current = store;
   useEffect(() => {
-    savePersist(userId, store);
+    const id = window.setTimeout(() => savePersist(userId, store), 400);
+    return () => window.clearTimeout(id);
   }, [store, userId]);
-
   useEffect(() => {
-    const ac = new AbortController();
-    setFeedStatus("loading");
-    (async () => {
-      try {
-        const data = await api.marketOhlc(active.symbol, active.timeframe, ac.signal);
-        if (data.candles?.length) {
-          setCandlesMap((m) => {
-            const n = new Map(m);
-            n.set(key, data.candles.map((c) => ({ t: c.t, o: c.o, h: c.h, l: c.l, c: c.c, v: c.v })));
-            return n;
-          });
-          setFeedStatus("live");
-          return;
-        }
-      } catch {
-        if (ac.signal.aborted) return;
-      }
+    const flush = () => savePersist(userId, latestStore.current);
+    window.addEventListener("pagehide", flush);
+    document.addEventListener("visibilitychange", flush);
+    return () => {
+      window.removeEventListener("pagehide", flush);
+      document.removeEventListener("visibilitychange", flush);
+      flush();
+    };
+  }, [userId]);
+
+  // Series come from a session cache: a timeframe or symbol seen before shows at once and refreshes quietly,
+  // a fetch under way is shared, and the neighbouring timeframes are warmed while the user looks at the chart.
+  useEffect(() => {
+    let cancelled = false;
+    const { symbol, timeframe } = active;
+    const hit = candleCache.peek(symbol, timeframe);
+    const show = (candles: Candle[]) => {
       setCandlesMap((m) => {
-        if ((m.get(key)?.length || 0) > 0) return m;
+        if (m.get(key) === candles) return m;
         const n = new Map(m);
-        n.set(key, candlesFor(active.symbol, active.timeframe));
+        n.set(key, candles);
         return n;
       });
-      setFeedStatus("sim");
-    })();
-    return () => ac.abort();
+      setFeedStatus("live");
+    };
+    if (hit) show(hit.candles);
+    else setFeedStatus("loading");
+    if (!hit || !candleCache.isFresh(symbol, timeframe)) {
+      candleCache.load(symbol, timeframe).then((candles) => {
+        if (cancelled) return;
+        if (candles) return show(candles);
+        setCandlesMap((m) => {
+          if ((m.get(key)?.length || 0) > 0) return m;
+          const n = new Map(m);
+          n.set(key, candlesFor(symbol, timeframe));
+          return n;
+        });
+        setFeedStatus("sim");
+      });
+    }
+    const near = ["1D", "1H", "15m", "5m", "1W"].filter((t) => t !== timeframe);
+    const stop = candleCache.prefetch(symbol, near);
+    return () => {
+      cancelled = true;
+      stop();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active.symbol, active.timeframe, key]);
 
   useEffect(() => {
@@ -326,7 +413,7 @@ export function Terminal({ userId, name }: { userId: string; name: string }) {
       ac.abort();
       document.removeEventListener("visibilitychange", onVis);
     };
-  }, [active.symbol, deskView, key, store.activeWatchlistId, store.engine.positions, store.watchlists, universeReady]);
+  }, [active.symbol, deskView, key, store.activeWatchlistId, store.engine.positions, store.watchlists, universeReady, quotesTry]);
 
   useEffect(() => {
     if (!replay.on) return;
@@ -360,7 +447,7 @@ export function Terminal({ userId, name }: { userId: string; name: string }) {
 
   useEffect(() => {
     setStore((s) => {
-      const eng = matchPending(s.engine, qMap);
+      const eng = rolloverDay(s.engine, qMap);
       if (eng === s.engine) return s;
       return { ...s, engine: eng };
     });
@@ -448,8 +535,7 @@ export function Terminal({ userId, name }: { userId: string; name: string }) {
         e.preventDefault();
         const el = indBtnRef.current;
         if (el) {
-          const r = el.getBoundingClientRect();
-          setFlyPos({ top: r.bottom + 4, left: r.left });
+          setFlyPos(anchorFly(el, "below"));
         }
         setOverlay("indicators");
         return;
@@ -499,18 +585,11 @@ export function Terminal({ userId, name }: { userId: string; name: string }) {
         setOverlay("replay");
         setReplay((r) => ({ ...r, on: true, playing: !r.playing, index: r.on ? r.index : Math.max(0, candles.length - 200) }));
       }
-      if (e.key.toLowerCase() === "b") {
-        setTicketSide("buy");
-        setRight("trade");
-        setConfirm(null);
-      }
-      if (e.key.toLowerCase() === "s" && !e.ctrlKey) {
-        setTicketSide("sell");
-        setRight("trade");
-      }
+      if (e.key.toLowerCase() === "b" && !e.ctrlKey && !e.metaKey && !e.altKey) openTicketRef.current(activeSymbolRef.current, "buy");
+      if (e.key.toLowerCase() === "s" && !e.ctrlKey && !e.metaKey && !e.altKey) openTicketRef.current(activeSymbolRef.current, "sell");
       if (e.altKey && e.key.toLowerCase() === "t") {
         e.preventDefault();
-        setRight("trade");
+        openTicketRef.current(activeSymbolRef.current, "buy");
       }
     }
     window.addEventListener("keydown", onKey);
@@ -520,6 +599,8 @@ export function Terminal({ userId, name }: { userId: string; name: string }) {
   useEffect(() => {
     if (overlay === "search") searchRef.current?.focus();
   }, [overlay]);
+
+  useEffect(() => { setChartRange(null); }, [key]);
 
   function patchSlot(partial: Partial<typeof active>) {
     setStore((s) => {
@@ -550,7 +631,8 @@ export function Terminal({ userId, name }: { userId: string; name: string }) {
     const r = el.getBoundingClientRect();
     if (!rb) return { top: r.bottom + 4, left: r.left };
     if (mode === "right") return { top: r.top - rb.top, left: r.right + 6 - rb.left };
-    return { top: r.bottom + 4 - rb.top, left: Math.max(8, r.left - rb.left) };
+    // 308 is the widest menu (the indicator list); keep it inside the screen on a phone.
+    return { top: r.bottom + 4 - rb.top, left: Math.max(8, Math.min(r.left - rb.left, rb.width - 308)) };
   }
 
   function pickSymbol(sym: string) {
@@ -606,48 +688,90 @@ export function Terminal({ userId, name }: { userId: string; name: string }) {
     setSelected({ id: inst.id, kind: "indicator" });
   }
 
-  function submitTicket(values: TicketValues) {
-    setConfirm({ kind: "order", values });
+  const setFees = useCallback(
+    (patch: Partial<FeeConfig>) =>
+      setStore((s) => {
+        const fees = { ...s.fees, ...patch };
+        return { ...s, fees, engine: { ...s.engine, fees } };
+      }),
+    [],
+  );
+
+  const engineRef = useRef(engine);
+  engineRef.current = engine;
+  const mergeQuotes = useCallback((list: Quote[]) => {
+    setQuotes((prev) => {
+      const next = new Map(prev);
+      for (const q of list) next.set(q.symbol, q);
+      return next;
+    });
+  }, []);
+  const wide = useMinWidth(901);
+  const docked = deskView === "chart" && wide;
+  const order = useOrderFlow({
+    engineRef,
+    quotes,
+    mergeQuotes,
+    setStore,
+    replayOn: replay.on,
+    onFilled: (receipt, closedTrades) => {
+      if (closedTrades) setBottomTab("journal");
+      if (receipt.side === "sell" && closedTrades) setJournalId(engineRef.current.trades[0]?.id ?? null);
+    },
+  });
+  const flow = order.flow;
+  // Where the ticket lives right now. A ticket docked beside the chart is not also shown as a sheet when the desk changes view.
+  const [via, setVia] = useState<"dock" | "sheet">("dock");
+  const activeSymbolRef = useRef(active.symbol);
+  activeSymbolRef.current = active.symbol;
+
+  /** The one way into the order ticket: from the header, the watchlist, a position row, the heat map or a key. */
+  function openTicket(sym: string, side: Side) {
+    if (deskView === "chart" && sym !== active.symbol) patchSlot({ symbol: sym });
+    setRight("trade");
+    setVia(docked ? "dock" : "sheet");
+    order.open(sym, side);
   }
+  const openTicketRef = useRef(openTicket);
+  openTicketRef.current = openTicket;
+
+  // On a desktop chart the ticket is docked beside it and follows the chart's symbol; it is never left empty.
+  useEffect(() => {
+    if (!docked || right !== "trade") return;
+    if (flow.step === "idle" || (flow.step === "quantity" && flow.symbol !== active.symbol)) {
+      setVia("dock");
+      order.open(active.symbol, flow.step === "idle" ? "buy" : flow.side);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [docked, right, flow.step, flow.symbol, active.symbol]);
+
+  const ticketSymbol = flow.symbol ?? active.symbol;
+  const ticketQuote = quotes.get(ticketSymbol) ?? null;
+  const ticketQty = parseQty(flow.qtyText);
+  const ticketCheck = useMemo(
+    () => checkTicket({ engine, symbol: ticketSymbol, side: flow.side, qty: ticketQty, quote: ticketQuote }),
+    [engine, ticketSymbol, flow.side, ticketQty, ticketQuote],
+  );
+  const ticketNode = (
+    <OrderTicket
+      symbol={ticketSymbol}
+      side={flow.side}
+      qtyText={flow.qtyText}
+      quote={ticketQuote}
+      priceState={order.priceState}
+      engine={engine}
+      onSide={order.setSide}
+      onQty={order.setQty}
+      onReview={() => order.review(ticketCheck.ok)}
+      onRetryPrice={order.retryPrice}
+    />
+  );
 
   function openJournal(trades: typeof engine.trades, previousCount: number) {
     if (trades.length <= previousCount) return;
     const newest = trades[0];
     setJournalId(newest.id);
     setBottomTab("journal");
-  }
-
-  function confirmOrder() {
-    if (confirm?.kind !== "order" || !quote) return;
-    const before = engine.trades.length;
-    const result = placeOrder(
-      engine,
-      { symbol: active.symbol, ...confirm.values, replay: replay.on },
-      quote,
-      qMap,
-    );
-    const closed = result.state.trades.length > before;
-    setStore((s) => ({ ...s, engine: result.state, bottomCollapsed: closed ? false : s.bottomCollapsed }));
-    setConfirm(null);
-    if (result.error) toast(result.error, "bad");
-    else {
-      const o = result.order;
-      const verb = o.side === "buy" ? "Bought" : "Sold";
-      const units = `${o.qty} ${unitWord(o.symbol, o.qty)} of ${info.name}`;
-      if (o.status === "filled") {
-        const fill = execPrice(o.side, quote, "market", engine.fees);
-        const realized = result.state.trades.slice(0, result.state.trades.length - before).reduce((a, t) => a + t.pnl, 0);
-        toast(
-          closed ? `${verb} ${units} at ₹${px(fill)} · Realized ${signedInr(realized)}` : `${verb} ${units} at ₹${px(fill)}`,
-          closed ? (realized >= 0 ? "good" : "bad") : "info",
-          closed ? 4200 : 3200,
-        );
-      } else {
-        const at = o.price ?? o.trigger;
-        toast(`${o.type.toUpperCase()} order placed: ${o.side} ${units}${at != null ? ` at ₹${px(at)}` : ""}`);
-      }
-      openJournal(result.state.trades, before);
-    }
   }
 
   function doClose(id: string) {
@@ -676,7 +800,24 @@ export function Terminal({ userId, name }: { userId: string; name: string }) {
 
   const eq = equity(engine, qMap);
   const dayPnl = eq - engine.account.dayPnlStartEquity;
+  const holdings = useMemo(() => calculateHoldings(engine, qMap), [engine, qMap]);
+  const summary = useMemo(() => calculateSummary(engine, holdings), [engine, holdings]);
+  const held = useMemo(() => new Map(holdings.filter((h) => h.side === "long").map((h) => [h.symbol, h.qty])), [holdings]);
+  const closes = useCloses(useMemo(() => holdings.map((h) => h.symbol), [holdings]));
   const celebrate = store.celebrate;
+
+  // Portfolio value readings for the value-over-time charts: at most one a minute, only once every position has a
+  // price (a reading taken before prices arrive would be cost, not value), and again whenever an order fills.
+  const lastReading = useRef(0);
+  useEffect(() => {
+    if (replay.on || !allPriced(holdings)) return;
+    const now = Date.now();
+    if (now - lastReading.current < 60_000 && engine.fills[0]?.time !== now) return;
+    lastReading.current = now;
+    const sim = holdings.some((h) => qMap.get(h.symbol)?.live !== true);
+    setStore((s) => ({ ...s, equityHistory: recordEquity(s.equityHistory, { t: now, v: summary.value, base: s.engine.account.dayPnlStartEquity, sim: sim || undefined }) }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [quotes, engine.fills.length]);
   const onPnlEvent = useCallback(
     (e: PnlEvent) => {
       if (e.kind === "milestone") {
@@ -702,21 +843,12 @@ export function Terminal({ userId, name }: { userId: string; name: string }) {
     const id = window.setTimeout(() => setCheer(false), 1400);
     return () => window.clearTimeout(id);
   }, [cheer]);
-  const openPos = engine.positions.filter((p) => p.status !== "closed");
-  const openOrd = engine.orders.filter((o) => o.status === "pending");
-  const st = stats(engine.trades);
   const wl = store.watchlists.find((w) => w.id === store.activeWatchlistId) || store.watchlists[0];
   const replayCutoff = replay.on ? replay.index : undefined;
   const lastPx = quote?.last || candles[candles.length - 1]?.c || info.base;
   const chg = quote?.change || 0;
   const chgPct = quote?.changePct || 0;
   const isFavorite = (store.watchlists.find((w) => w.id === "mine")?.symbols || []).includes(active.symbol);
-  const legendBar = hover || (candles.length ? candles[candles.length - 1] : null);
-  const legendPrev = hover
-    ? candles.find((c) => c.t < hover.t && c.t === candles.filter((x) => x.t < hover.t).at(-1)?.t) || candles[0]
-    : candles.length > 1
-      ? candles[candles.length - 2]
-      : legendBar;
   const compareCandles = compareSymbol
     ? candlesMap.get(seedKey(compareSymbol, active.timeframe)) || []
     : [];
@@ -728,17 +860,34 @@ export function Terminal({ userId, name }: { userId: string; name: string }) {
     () => engine.trades.filter((t) => t.symbol === active.symbol),
     [engine.trades, active.symbol],
   );
-  const onHover = useCallback((info: { o: number; h: number; l: number; c: number; v: number; t: number } | null) => {
-    setHover((prev) => {
-      if (!info && !prev) return prev;
-      if (info && prev && info.t === prev.t && info.c === prev.c && info.h === prev.h && info.l === prev.l) return prev;
-      return info;
-    });
-  }, []);
+  const onHover = useCallback((info: { i: number } | null) => hoverStore.set(info ? info.i : null), [hoverStore]);
+  // Indicator readouts are a pass over the series each; compute them when the data or the studies change, not on every render.
+  const indicatorReadouts = useMemo(() => {
+    const out = new Map<string, ReturnType<typeof latestIndicatorValues>>();
+    for (const i of indicators) if (i.kind !== "volume" && i.showLegend && i.visible) out.set(i.id, latestIndicatorValues(i, candles));
+    return out;
+  }, [indicators, candles]);
 
   const hits = useMemo(() => {
     return searchSymbols(symQ, symIndex);
   }, [symQ, symIndex, universeReady]);
+
+  // Search results show a price and the day's move, so fetch the few visible ones that have none yet.
+  useEffect(() => {
+    if (overlay !== "search") return;
+    const need = hits.map((h) => h.symbol).filter((sym) => !(quotes.get(sym)?.last)).slice(0, 12);
+    if (!need.length) return;
+    const ac = new AbortController();
+    const id = window.setTimeout(() => {
+      api.marketQuotes(need, ac.signal).then((data) => {
+        const list = (data.quotes || []).filter((q) => q.last > 0).map((q) => quoteFromLive(q.symbol, q));
+        if (list.length) mergeQuotes(list);
+      }).catch(() => {});
+    }, 300);
+    return () => { window.clearTimeout(id); ac.abort(); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [overlay, hits]);
+
 
   const indHits = useMemo(() => {
     const n = indQ.trim().toLowerCase();
@@ -759,18 +908,16 @@ export function Terminal({ userId, name }: { userId: string; name: string }) {
   function openChart(sym: string) {
     patchSlot({ symbol: sym });
     setDeskView("chart");
-    setMobile("chart");
   }
 
   return (
-    <div className={`term-root ${store.appearance === "cosmic" ? "cosmic" : ""} ${store.learningMode ? "learn-on" : ""} ${deskView !== "chart" ? "desk-board" : ""} ${mobile === "markets" ? "rail-open" : ""} ${mobile === "trade" ? "rail-open" : ""}`} data-testid="terminal" style={{ ["--term-right" as string]: `${Math.max(240, Math.min(460, store.rightWidth || 300))}px` }}>
+    <div className={`term-root ${store.appearance === "cosmic" ? "cosmic" : ""} ${store.learningMode ? "learn-on" : ""} ${deskView !== "chart" ? "desk-board" : ""}`} data-testid="terminal" style={{ ["--term-right" as string]: `${Math.max(240, Math.min(460, store.rightWidth || 300))}px` }}>
       <a className="skip" href="#chart">Skip to chart</a>
       <DeskNav
         current={deskView}
         onChange={(id) => {
           withViewTransition(() => {
             setDeskView(id);
-            setMobile(id === "chart" ? "chart" : id === "portfolio" ? "portfolio" : "markets");
             setDrawGroup(null);
             if (id === "chart") setOverlay(null);
           });
@@ -868,6 +1015,21 @@ export function Terminal({ userId, name }: { userId: string; name: string }) {
       </nav>
 
       <section className="term-main" id="chart">
+        {deskView === "home" ? (
+          <PaperHome
+            engine={engine}
+            quotes={quotes}
+            quotesLoading={quotesLoading}
+            history={store.equityHistory}
+            watchlist={wl}
+            universeLoading={!universeReady}
+            onTrade={(sym, side) => openTicket(sym, side)}
+            onOpenChart={openChart}
+            onSearch={() => { setSearchIntent("chart"); setOverlay("search"); }}
+            onOpenHeatmap={() => setDeskView("heatmap")}
+            onRetryQuotes={() => { candleCache.load("NIFTY", "1D"); setQuotesTry((n) => n + 1); }}
+          />
+        ) : null}
         {deskView === "heatmap" ? (
           <HeatMap quotes={quotes} loading={quotesLoading} onPick={openChart} />
         ) : null}
@@ -875,7 +1037,10 @@ export function Terminal({ userId, name }: { userId: string; name: string }) {
           <WorldMap quotes={quotes} loading={quotesLoading} onPick={openChart} />
         ) : null}
         {deskView === "portfolio" ? (
-          <PortfolioBoard engine={engine} quotes={quotes} dayPnl={dayPnl} samples={pnlSamples} cheer={cheer} onPick={openChart} />
+          <PortfolioBoard engine={engine} quotes={quotes} dayPnl={dayPnl} samples={pnlSamples} cheer={cheer} onPick={openChart} profile={taxProfile} onOpenTax={() => setDeskView("tax")} onTrade={(sym, side) => openTicket(sym, side)} />
+        ) : null}
+        {deskView === "tax" ? (
+          <CapitalGainsBoard engine={engine} quotes={quotes} profile={taxProfile} onProfile={setTaxProfile} onPick={openChart} onBack={() => setDeskView("portfolio")} />
         ) : null}
         {deskView === "chart" ? (
           <>
@@ -905,8 +1070,7 @@ export function Terminal({ userId, name }: { userId: string; name: string }) {
             aria-haspopup="dialog"
             aria-expanded={overlay === "indicators"}
             onClick={(e) => {
-              const r = e.currentTarget.getBoundingClientRect();
-              setFlyPos({ top: r.bottom + 4, left: r.left });
+              setFlyPos(anchorFly(e.currentTarget, "below"));
               setOverlay(overlay === "indicators" ? null : "indicators");
               setDrawGroup(null);
             }}
@@ -916,13 +1080,18 @@ export function Terminal({ userId, name }: { userId: string; name: string }) {
           <span className="sep" aria-hidden />
           <button type="button" className="term-tb" aria-label="Alert" onClick={() => setOverlay("alerts")}>Alert</button>
           <button type="button" className="term-tb" aria-label="Replay" onClick={() => { setOverlay("replay"); setReplay((r) => ({ ...r, on: true, index: Math.max(0, candles.length - 180) })); }}>Replay</button>
+          <span className="pt-range-chips" role="group" aria-label="Chart range">
+            {RANGE_CHIPS.map((r) => (
+              <button key={r.id} type="button" className="term-tb" aria-pressed={chartRange === r.id} onClick={() => { setChartRange(r.id); chartApi.current?.showRange(r.ms); }}>{r.id}</button>
+            ))}
+          </span>
           <button type="button" className="term-ico" aria-label="Chart settings" onClick={() => { setSettingsTab("Chart"); setOverlay("settings"); }}>⚙</button>
         </div>
         <div className="term-chart-stage">
-        <div className="term-chart-head">
+        <div className="term-chart-head" ref={headRef}>
           <div className="term-legend-row">
             <h1>{info.name}</h1>
-            <p className="sub">{active.timeframe} · {info.exchange} <span className={quote?.live || feedStatus === "live" ? "term-live" : "term-sim"}>{quote?.live || feedStatus === "live" ? "LIVE · 20s" : "SIMULATED"}</span></p>
+            <p className="sub">{active.timeframe} · {info.exchange} <span className={quote?.live || feedStatus === "live" ? "term-live" : "term-sim"} title="Prices are refreshed every 20 seconds and can be delayed.">{quote?.live || feedStatus === "live" ? "MARKET DATA · 20s" : "SIMULATED"}</span></p>
             <div className={`px ${chg >= 0 ? "up" : "down"}${pxPulse ? ` tick-${pxPulse}` : ""}`}>{px(lastPx)}</div>
             <div className={chg >= 0 ? "up" : "down"}>{signedPx(chg)} ({pct(chgPct)})</div>
             {info.assetClass === "stock" || info.assetClass === "etf" ? (
@@ -930,6 +1099,10 @@ export function Terminal({ userId, name }: { userId: string; name: string }) {
                 Fetch financials
               </button>
             ) : null}
+            <span className="pt-head-trade" role="group" aria-label={`Trade ${info.name}`}>
+              <button type="button" className="buy" onClick={() => openTicket(active.symbol, "buy")}>BUY</button>
+              <button type="button" className="sell" onClick={() => openTicket(active.symbol, "sell")}>SELL</button>
+            </span>
             {compareSymbol ? (
               <span className="compare-chip">
                 vs {compareSymbol}
@@ -937,18 +1110,10 @@ export function Terminal({ userId, name }: { userId: string; name: string }) {
               </span>
             ) : null}
           </div>
-          {legendBar ? (
-            <div className="term-ohlc" aria-live="polite">
-              <span>O <b className={(legendBar.o >= (legendPrev?.c || legendBar.o) ? "up" : "down")}>{px(legendBar.o)}</b></span>
-              <span>H <b className={(legendBar.h >= (legendPrev?.c || legendBar.h) ? "up" : "down")}>{px(legendBar.h)}</b></span>
-              <span>L <b className={(legendBar.l >= (legendPrev?.c || legendBar.l) ? "up" : "down")}>{px(legendBar.l)}</b></span>
-              <span>C <b className={(legendBar.c >= (legendPrev?.c || legendBar.c) ? "up" : "down")}>{px(legendBar.c)}</b></span>
-              <span>Vol <b>{vol(legendBar.v)}</b></span>
-            </div>
-          ) : null}
+          <OhlcLegend candles={candles} store={hoverStore} />
           <div className="term-chips">
               {indicators.filter((i) => i.kind !== "volume" && i.showLegend).map((i) => {
-                const vals = i.visible ? latestIndicatorValues(i, candles) : [];
+                const vals = indicatorReadouts.get(i.id) ?? [];
                 return (
                 <span key={i.id} className="term-chip" style={{ color: i.style.color }}>
                   <button type="button" className={i.visible ? "" : "off"} aria-label={i.label} onClick={() => { setSelected({ id: i.id, kind: "indicator" }); }}>
@@ -989,12 +1154,12 @@ export function Terminal({ userId, name }: { userId: string; name: string }) {
           selectedId={selected?.id || null}
           replayCutoff={replayCutoff}
           showPnl={store.showPositionPnl}
+          topInset={headInset}
           last={lastPx}
           compare={compareSymbol && compareCandles.length ? { symbol: compareSymbol, candles: compareCandles } : null}
           status={feedStatus === "loading" && candles.length === 0 ? "loading" : "ready"}
           onSelect={(id, kind) => setSelected(id && kind ? { id, kind } : null)}
           onDrawings={setDrawings}
-          onDragLevel={(id, field, price) => setStore((s) => ({ ...s, engine: modifyPosition(s.engine, id, { [field]: price }) }))}
           onContext={(ev) => setCtx({ x: ev.x, y: ev.y })}
           onHover={onHover}
           onReady={(api) => { chartApi.current = api; }}
@@ -1042,7 +1207,7 @@ export function Terminal({ userId, name }: { userId: string; name: string }) {
           }}
         />
         <div className="term-rtabs" role="tablist">
-          {(["watchlist", "details", "trade"] as const).map((id) => (
+          {(["trade", "watchlist", "details"] as const).map((id) => (
             <button key={id} type="button" role="tab" aria-selected={right === id} onClick={() => setRight(id)}>
               {id === "watchlist" ? "Watchlist" : id === "details" ? "Details" : "Trade"}
             </button>
@@ -1060,24 +1225,14 @@ export function Terminal({ userId, name }: { userId: string; name: string }) {
               setQ={setWlQ}
               active={active.symbol}
               onPick={(sym) => { patchSlot({ symbol: sym }); }}
-              onTrade={(sym) => { patchSlot({ symbol: sym }); setRight("trade"); }}
+              held={held}
+              onTrade={(sym, side) => openTicket(sym, side)}
               onAdd={() => { setSearchIntent("watchlist"); setOverlay("search"); }}
               onMenu={(menu) => setWlMenu(menu)}
             />
           ) : null}
           {right === "details" ? <DetailsPane info={info} quote={quote} onFinancials={() => setOverlay("financials")} /> : null}
-          {right === "trade" ? (
-            <TradeTicket
-              key={`${active.symbol}-${ticketSide}-ticket`}
-              symbol={active.symbol}
-              quote={quote}
-              initialSide={ticketSide}
-              defaultQty={info.lotSize}
-              cash={engine.account.cash}
-              learning={store.learningMode}
-              onSubmit={submitTicket}
-            />
-          ) : null}
+          {right === "trade" ? (docked ? ticketNode : <p className="pt-muted pt-pad">Use BUY or SELL on the chart to open the order ticket.</p>) : null}
         </div>
       </aside>
 
@@ -1103,14 +1258,14 @@ export function Terminal({ userId, name }: { userId: string; name: string }) {
               window.addEventListener("pointerup", up);
             }}
           />
-          {(["positions", "orders", "history", "portfolio", "journal", "account"] as const).map((id) => (
+          {(["positions", "orders", "history", "analytics", "journal"] as const).map((id) => (
             <button
               key={id}
               type="button"
               aria-selected={bottomTab === id}
               onClick={() => { setBottomTab(id); setStore((s) => ({ ...s, bottomCollapsed: false })); }}
             >
-              {id === "positions" ? `Positions ${openPos.length}` : id === "orders" ? `Orders ${openOrd.length}` : id === "history" ? "Trade history" : id === "portfolio" ? "Portfolio" : id === "journal" ? "Journal" : "Account"}
+              {id === "positions" ? `Positions ${holdings.length}` : id === "orders" ? "Orders" : id === "history" ? "History" : id === "analytics" ? "Analytics" : "Journal"}
             </button>
           ))}
           <div className="meta">
@@ -1124,85 +1279,33 @@ export function Terminal({ userId, name }: { userId: string; name: string }) {
         {!store.bottomCollapsed ? (
           <div className="term-rbody">
             {bottomTab === "positions" ? (
-              openPos.length === 0 ? (
-                <div className="empty-compact">
-                  <strong>No open positions</strong>
-                  <p>Your paper account currently has no active positions.</p>
-                  <button type="button" className="btn" onClick={() => setOverlay("search")}>Explore markets</button>
-                </div>
-              ) : (
-                <table className="term-table">
-                  <thead>
-                    <tr>{["Symbol", "Side", "Qty", "Avg", "LTP", "P&L", "P&L %", "Session", "SL", "TP", ""].map((h) => <th key={h}>{h}</th>)}</tr>
-                  </thead>
-                  <tbody>
-                    {openPos.map((p) => {
-                      const last = quotes.get(p.symbol)?.last || p.avgPrice;
-                      const u = unrealized(p, last);
-                      return (
-                        <tr key={p.id}>
-                          <td><span className="pos-id"><DeskMark info={findSymbol(p.symbol)} size={16} />{findSymbol(p.symbol).name}</span></td>
-                          <td>{p.side.toUpperCase()}</td>
-                          <td>{p.qty}</td>
-                          <td>{px(p.avgPrice)}</td>
-                          <td>{px(last)}</td>
-                          <td className={u >= 0 ? "up" : "down"}>{signedInr(u)}</td>
-                          <td className={u >= 0 ? "up" : "down"}>{pct(u / (p.avgPrice * p.qty))}</td>
-                          <td>
-                            <PnlSpark points={positionSeries(pnlSamples, p.id)} label={findSymbol(p.symbol).name} />
-                          </td>
-                          <td>
-                            <LevelField
-                              label={`Stop loss ${p.symbol}`}
-                              value={p.sl}
-                              step={findSymbol(p.symbol).tickSize}
-                              onCommit={(sl) => setStore((s) => ({ ...s, engine: modifyPosition(s.engine, p.id, { sl }) }))}
-                            />
-                          </td>
-                          <td>
-                            <LevelField
-                              label={`Take profit ${p.symbol}`}
-                              value={p.tp}
-                              step={findSymbol(p.symbol).tickSize}
-                              onCommit={(tp) => setStore((s) => ({ ...s, engine: modifyPosition(s.engine, p.id, { tp }) }))}
-                            />
-                          </td>
-                          <td>
-                            <div className="row-acts">
-                              <button type="button" className="btn ghost" onClick={() => setConfirm({ kind: "close", id: p.id })}>Close</button>
-                            </div>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              )
+              <div className="term-rbody-pad">
+                <PositionsTable
+                  holdings={holdings}
+                  onTrade={(sym, side) => openTicket(sym, side)}
+                  onOpen={(sym) => openChart(sym)}
+                  onExplore={() => { setSearchIntent("chart"); setOverlay("search"); }}
+                />
+              </div>
             ) : null}
             {bottomTab === "orders" ? (
-              openOrd.length + engine.orders.length === 0 ? (
-                <div className="empty-compact">No open orders.</div>
+              engine.orders.length === 0 ? (
+                <EmptyState title="No orders yet" body="Orders you place appear here, filled or refused, with the reason." />
               ) : (
                 <table className="term-table">
                   <thead>
-                    <tr>{["Order ID", "Time", "Symbol", "Side", "Type", "Qty", "Price", "Status", ""].map((h) => <th key={h}>{h}</th>)}</tr>
+                    <tr>{["Order", "Time", "Stock", "Side", "Qty", "Price", "Status"].map((h) => <th key={h}>{h}</th>)}</tr>
                   </thead>
                   <tbody>
-                    {engine.orders.slice(0, 40).map((o) => (
+                    {engine.orders.slice(0, 60).map((o) => (
                       <tr key={o.id}>
                         <td>{o.id.slice(-6)}</td>
                         <td>{new Date(o.time).toLocaleTimeString()}</td>
-                        <td>{o.symbol}</td>
+                        <td>{findSymbol(o.symbol).symbol}</td>
                         <td>{o.side.toUpperCase()}</td>
-                        <td>{o.type}</td>
                         <td>{o.qty}</td>
-                        <td>{o.price ? px(o.price) : "MKT"}</td>
-                        <td>{o.status}{o.rejectReason ? ` · ${o.rejectReason}` : ""}</td>
-                        <td>
-                          {o.status === "pending" ? (
-                            <button type="button" className="btn ghost" onClick={() => setStore((s) => ({ ...s, engine: { ...s.engine, orders: s.engine.orders.map((x) => x.id === o.id ? { ...x, status: "cancelled" } : x) } }))}>Cancel</button>
-                          ) : null}
-                        </td>
+                        <td>{o.status === "filled" && o.price ? px(o.price) : "Market"}</td>
+                        <td>{o.status === "rejected" ? `Refused · ${o.rejectReason ?? ""}` : o.status === "cancelled" ? "Cancelled" : o.status === "filled" ? "Filled" : o.status}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -1212,75 +1315,97 @@ export function Terminal({ userId, name }: { userId: string; name: string }) {
             {bottomTab === "history" ? (
               <>
                 <div className="wl-head">
-                  {(["today", "week", "month", "all"] as const).map((r) => (
-                    <button key={r} type="button" className="term-tb" aria-pressed={histRange === r} onClick={() => setHistRange(r)}>{r}</button>
+                  {([["transactions", "Transactions"], ["trades", "Closed trades"], ["charges", "Charge detail"]] as const).map(([id, label]) => (
+                    <button key={id} type="button" className="term-tb" aria-pressed={histView === id} onClick={() => setHistView(id)}>{label}</button>
                   ))}
-                  <button type="button" className="btn ghost" onClick={() => download("trades.csv", toCsv(engine.trades))}>CSV</button>
-                  <button type="button" className="btn ghost" onClick={() => download("trades.xls", toCsv(engine.trades))}>Excel</button>
+                  {histView === "trades" ? (["today", "week", "month", "all"] as const).map((r) => (
+                    <button key={r} type="button" className="term-tb" aria-pressed={histRange === r} onClick={() => setHistRange(r)}>{r}</button>
+                  )) : null}
+                  <button type="button" className="btn ghost" onClick={() => download(histView === "trades" ? "trades.csv" : "transactions.csv", histView === "trades" ? toCsv(engine.trades) : fillsToCsv(engine.fills))}>CSV</button>
                 </div>
-                {engine.trades.length === 0 ? (
-                  <div className="empty-compact">No trades yet.</div>
-                ) : (
-                  <table className="term-table">
-                    <thead>
-                      <tr>{["Date", "Symbol", "Side", "Entry", "Exit", "Qty", "P&L", "Return %", "Duration", ""].map((h) => <th key={h || "note"}>{h}</th>)}</tr>
-                    </thead>
-                    <tbody>
-                      {historyFilter(engine.trades, histRange).map((t) => (
-                        <tr key={t.id}>
-                          <td>{new Date(t.closedAt).toLocaleString()}</td>
-                          <td>{t.symbol}</td>
-                          <td>{t.side.toUpperCase()}</td>
-                          <td>{px(t.entry)}</td>
-                          <td>{px(t.exit)}</td>
-                          <td>{t.qty}</td>
-                          <td className={t.pnl >= 0 ? "up" : "down"}>{signedInr(t.pnl)}</td>
-                          <td>{pct(t.returnPct)}</td>
-                          <td>{dur(t.durationMs)}</td>
-                          <td>
-                            <button type="button" className="btn ghost" onClick={() => { setJournalId(t.id); setBottomTab("journal"); }}>Note</button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                )}
+                {histView === "transactions" ? (
+                  engine.fills.length === 0 ? (
+                    <EmptyState title="No transactions yet" body="Every buy and sell is listed here with its price, charges and net value." />
+                  ) : (
+                    <table className="term-table" aria-label="Transactions">
+                      <thead>
+                        <tr>{["Date", "Stock", "Side", "Quantity", "Execution price", "Trade value", "Charges", "Net value"].map((h) => <th key={h}>{h}</th>)}</tr>
+                      </thead>
+                      <tbody>
+                        {engine.fills.map((f) => (
+                          <tr key={f.id}>
+                            <td>{new Date(f.time).toLocaleDateString("en-IN", { day: "2-digit", month: "short" })} {new Date(f.time).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}</td>
+                            <td>{findSymbol(f.symbol).symbol}</td>
+                            <td><b className={f.side === "buy" ? "up" : "down"}>{f.side.toUpperCase()}</b></td>
+                            <td>{f.qty} {f.qty === 1 ? "share" : "shares"}</td>
+                            <td>{inr(f.price)}</td>
+                            <td>{inr(f.gross)}</td>
+                            <td>{f.charges.total > 0 ? inr(f.charges.total) : "—"}</td>
+                            <td>{inr(f.net)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )
+                ) : null}
+                {histView === "trades" ? (
+                  engine.trades.length === 0 ? (
+                    <EmptyState title="No closed trades yet" body="A trade is complete when you sell what you bought. Its profit or loss appears here." />
+                  ) : (
+                    <table className="term-table" aria-label="Closed trades">
+                      <thead>
+                        <tr>{["Closed", "Stock", "Entry", "Exit", "Qty", "Gross P&L", "Charges", "Net P&L", "Return", "Held", ""].map((h) => <th key={h || "note"}>{h}</th>)}</tr>
+                      </thead>
+                      <tbody>
+                        {historyFilter(engine.trades, histRange).map((t) => (
+                          <tr key={t.id}>
+                            <td>{new Date(t.closedAt).toLocaleString()}</td>
+                            <td>{findSymbol(t.symbol).symbol}</td>
+                            <td>{px(t.entry)}</td>
+                            <td>{px(t.exit)}</td>
+                            <td>{t.qty}</td>
+                            <td>{signedInr(t.grossPnl ?? t.pnl + t.fees)}</td>
+                            <td>{t.fees > 0 ? inr(t.fees) : "—"}</td>
+                            <td className={t.pnl >= 0 ? "up" : "down"}>{signedInr(t.pnl)}</td>
+                            <td>{pct(t.returnPct)}</td>
+                            <td>{dur(t.durationMs)}</td>
+                            <td>
+                              <button type="button" className="btn ghost" onClick={() => { setJournalId(t.id); setBottomTab("journal"); }}>Note</button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )
+                ) : null}
+                {histView === "charges" ? (
+                  <div className="term-rbody-pad">
+                    <LedgerPane fills={engine.fills} onDownload={download} />
+                  </div>
+                ) : null}
               </>
             ) : null}
-            {bottomTab === "portfolio" ? (
+            {bottomTab === "analytics" ? (
               <div className="term-rbody-pad">
                 {store.learningMode ? (
-                  <p className="learn-hint">Equity is cash plus the mark-to-market of open positions. Day P&L resets with the session anchor.</p>
+                  <p className="learn-hint">Portfolio value is cash plus the market value of what you hold. Every figure here comes from the same account as your positions table.</p>
                 ) : null}
-                <div className="port-grid blot-port">
-                <div className="stat"><span>Equity</span><b><AnimatedNumber value={eq} format={money0} /></b></div>
-                <div className="stat"><span>Cash</span><b><AnimatedNumber value={engine.account.cash} format={money0} /></b></div>
-                <div className="stat"><span>Invested</span><b><AnimatedNumber value={invested(engine)} format={money0} /></b></div>
-                <div className="stat"><span>Today</span><b className={dayPnl >= 0 ? "up" : "down"}><AnimatedNumber value={dayPnl} format={signed0} /></b></div>
-                <EquitySpark curve={st.curve} />
+                <PortfolioAnalytics engine={engine} holdings={holdings} summary={summary} history={store.equityHistory} closes={closes} onOpen={openChart} hover={allocHover} onHover={setAllocHover} />
+                <div className="pt-account-foot">
+                  <span>Started with {inr(engine.account.startingBalance, 0)} of paper cash.</span>
+                  <button type="button" className="btn ghost" onClick={() => setOverlay("reset")}>Reset paper account</button>
                 </div>
-                <PracticeStrip trades={engine.trades} orders={engine.orders} />
-                <PnlHistoryChart samples={pnlSamples} height={140} compact />
               </div>
             ) : null}
             {bottomTab === "journal" ? (
-              <JournalPane
-                trades={engine.trades}
-                journals={store.journals}
-                selectedId={journalId || engine.trades[0]?.id || null}
-                learning={store.learningMode}
-                onSelect={setJournalId}
-                onNote={(id, note) => setStore((s) => ({ ...s, journals: { ...s.journals, [id]: note } }))}
-              />
-            ) : null}
-            {bottomTab === "account" ? (
-              <div className="acct-grid">
-                <div><dt>Starting balance</dt><dd>{inr(engine.account.startingBalance, 0)}</dd></div>
-                <div><dt>Equity</dt><dd>{inr(eq, 0)}</dd></div>
-                <div><dt>Cash</dt><dd>{inr(engine.account.cash, 0)}</dd></div>
-                <div><dt>Day P&L</dt><dd className={dayPnl >= 0 ? "up" : "down"}>{signedInr(dayPnl, 0)}</dd></div>
-                <div><dt>Total P&L</dt><dd className={eq - engine.account.startingBalance >= 0 ? "up" : "down"}>{signedInr(eq - engine.account.startingBalance, 0)}</dd></div>
-                <div><button type="button" className="btn ghost" onClick={() => setOverlay("reset")}>Reset paper account</button></div>
+              <div className="term-rbody-pad">
+                <JournalPanel
+                  trades={engine.trades}
+                  journals={store.journals}
+                  selectedId={journalId || engine.trades[0]?.id || null}
+                  onSelect={setJournalId}
+                  onEntry={(id, entry) => setStore((s) => ({ ...s, journals: { ...s.journals, [id]: entry } }))}
+                />
               </div>
             ) : null}
           </div>
@@ -1288,12 +1413,12 @@ export function Terminal({ userId, name }: { userId: string; name: string }) {
       </footer>
 
       <nav className="mobile-nav" aria-label="Mobile">
-        {(["chart", "heatmap", "world", "portfolio", "trade"] as const).map((id) => (
-          <button key={id} type="button" aria-current={mobile === id || deskView === id} onClick={() => {
-            setMobile(id === "trade" ? "trade" : id === "chart" ? "chart" : "markets");
-            if (id === "chart" || id === "heatmap" || id === "world" || id === "portfolio") setDeskView(id);
-            if (id === "trade") { setDeskView("chart"); setRight("trade"); }
-          }}>{id === "heatmap" ? "heat" : id}</button>
+        {(["chart", "home", "heatmap", "world", "portfolio", "trade"] as const).map((id) => (
+          <button key={id} type="button" aria-current={deskView === id} onClick={() => {
+            if (id !== "trade") setDeskView(id);
+            // The ticket rises from the bottom as a sheet; it is the one way to trade on a phone.
+            else openTicket(active.symbol, "buy");
+          }}>{id === "heatmap" ? "heat" : id === "home" ? "overview" : id}</button>
         ))}
       </nav>
 
@@ -1363,11 +1488,7 @@ export function Terminal({ userId, name }: { userId: string; name: string }) {
                   <div className="ind-cat">RECENT</div>
                   {store.recentSymbols.map((s) => {
                     const x = findSymbol(s);
-                    return (
-                      <button key={s} type="button" className="hit" onClick={() => pickSymbol(s)}>
-                        <span className="hit-id"><DeskMark info={x} /><span><strong>{x.symbol}</strong> {x.name}</span></span><span className="ex">{x.exchange}</span>
-                      </button>
-                    );
+                    return <SearchHit key={s} info={x} quote={quotes.get(s)} owned={held.get(s) ?? 0} onPick={() => pickSymbol(s)} />;
                   })}
                 </>
               ) : null}
@@ -1378,10 +1499,7 @@ export function Terminal({ userId, name }: { userId: string; name: string }) {
                   <div key={cls}>
                     <div className="ind-cat">{label}{symIndex ? ` · ${rows.length}` : ""}</div>
                     {rows.map((h) => (
-                      <button key={h.symbol} type="button" className="hit" onClick={() => pickSymbol(h.symbol)}>
-                        <span className="hit-id"><DeskMark info={h} /><span><strong>{h.symbol}</strong> {h.name}</span></span>
-                        <span className="ex">{h.indices?.[0] || h.exchange}</span>
-                      </button>
+                      <SearchHit key={h.symbol} info={h} quote={quotes.get(h.symbol)} owned={held.get(h.symbol) ?? 0} onPick={() => pickSymbol(h.symbol)} />
                     ))}
                   </div>
                 );
@@ -1479,9 +1597,56 @@ export function Terminal({ userId, name }: { userId: string; name: string }) {
                     <label>Slippage %
                       <input type="number" step={0.01} value={store.fees.slippagePct} onChange={(e) => setStore((s) => ({ ...s, fees: { ...s.fees, slippagePct: Number(e.target.value) }, engine: { ...s.engine, fees: { ...s.engine.fees, slippagePct: Number(e.target.value) } } }))} />
                     </label>
-                    <label>Brokerage %
-                      <input type="number" step={0.01} value={store.fees.brokeragePct} onChange={(e) => setStore((s) => ({ ...s, fees: { ...s.fees, brokeragePct: Number(e.target.value) }, engine: { ...s.engine, fees: { ...s.engine.fees, brokeragePct: Number(e.target.value) } } }))} />
+                    <label>Broker profile
+                      <select value={store.fees.profileId} onChange={(e) => setFees({ profileId: e.target.value })}>
+                        {brokerProfileList().map((p) => (
+                          <option key={p.id} value={p.id}>{p.label}</option>
+                        ))}
+                      </select>
                     </label>
+                    <p className="muted">{CHARGES.brokerProfiles.profiles[store.fees.profileId]?.description} {CHARGES.disclaimer}</p>
+                    {store.fees.profileId === "custom" ? (
+                      <fieldset className="cx-profile">
+                        <legend>Your brokerage</legend>
+                        <div className="cx-fields">
+                          {([
+                            ["Delivery %", "equityDelivery", "pct"],
+                          ] as const).map(([label, seg, field]) => {
+                            const base = CHARGES.brokerProfiles.profiles.custom[seg] as Record<string, number | undefined>;
+                            const mine = (store.fees.custom?.[seg] ?? {}) as Record<string, number | undefined>;
+                            const value = mine[field] ?? base[field] ?? "";
+                            return (
+                              <label key={label}>
+                                <span>{label}</span>
+                                <input
+                                  type="number"
+                                  min={0}
+                                  step={0.01}
+                                  value={value}
+                                  onChange={(e) => {
+                                    const n = e.target.value === "" ? undefined : Math.max(0, Number(e.target.value));
+                                    setFees({ custom: { ...store.fees.custom, [seg]: { ...base, ...mine, [field]: n } } });
+                                  }}
+                                />
+                              </label>
+                            );
+                          })}
+                          <label>
+                            <span>DP charge ₹ per scrip sold</span>
+                            <input
+                              type="number"
+                              min={0}
+                              step={0.5}
+                              value={store.fees.custom?.dpChargePerScripSell ?? CHARGES.brokerProfiles.profiles.custom.dpChargePerScripSell}
+                              onChange={(e) => setFees({ custom: { ...store.fees.custom, dpChargePerScripSell: Math.max(0, Number(e.target.value)) } })}
+                            />
+                          </label>
+                        </div>
+                        <p className="cx-quiet-text">Statutory charges (STT, exchange, SEBI, stamp duty, GST) stay as the rules set them.</p>
+                      </fieldset>
+                    ) : null}
+                    <TaxProfileForm profile={taxProfile} onChange={setTaxProfile} />
+                    <CostDisclosure />
                     <button type="button" className="btn danger" onClick={() => setOverlay("reset")}>Reset paper account</button>
                   </>
                 ) : null}
@@ -1489,7 +1654,7 @@ export function Terminal({ userId, name }: { userId: string; name: string }) {
                   <p className="muted">Ctrl+K search · Ctrl+I indicators · B buy · S sell · Alt+T trade · Delete · Esc · Space replay · F11 fullscreen</p>
                 ) : null}
                 {settingsTab === "Trading" || settingsTab === "Orders" ? (
-                  <p className="muted">Market orders only — everyone fills at the same last. Bracket with SL + TP. Zero-cost fees by default.</p>
+                  <p className="muted">Every order is a market order, long only and paid for in cash: there are no limit or stop orders, no short selling and no leverage. Charges follow the broker profile in Paper Account settings and are shown before you confirm.</p>
                 ) : null}
                 {settingsTab === "Notifications" ? (
                   <>
@@ -1516,7 +1681,7 @@ export function Terminal({ userId, name }: { userId: string; name: string }) {
             <header><h2>Save layout</h2><button type="button" className="term-ico" aria-label="Close" onClick={() => setOverlay(null)}>×</button></header>
             <div className="body">
               <button type="button" className="btn" onClick={() => {
-                const nameL = window.prompt("Layout name", "My Intraday Setup");
+                const nameL = window.prompt("Layout name", "My chart setup");
                 if (!nameL) return;
                 setStore((s) => ({ ...s, layouts: [{ id: `l${Date.now()}`, name: nameL, symbol: active.symbol, timeframe: active.timeframe, chartType: active.chartType, indicators, drawings, watchlistId: s.activeWatchlistId, chartCount: s.chartCount }, ...s.layouts] }));
                 toast("Layout saved.");
@@ -1555,21 +1720,6 @@ export function Terminal({ userId, name }: { userId: string; name: string }) {
         </div>
       ) : null}
 
-      {overlay === "portfolio" ? (
-        <div className="term-overlay" onMouseDown={(e) => { if (e.target === e.currentTarget) setOverlay(null); }}>
-          <div className="term-modal wide" role="dialog" aria-label="Portfolio">
-            <header><h2>Paper portfolio</h2><button type="button" className="term-ico" aria-label="Close" onClick={() => setOverlay(null)}>×</button></header>
-            <div className="port-grid">
-              <div className="stat"><span>Equity</span><b>{inr(eq, 0)}</b></div>
-              <div className="stat"><span>Cash</span><b>{inr(engine.account.cash, 0)}</b></div>
-              <div className="stat"><span>Invested</span><b>{inr(invested(engine), 0)}</b></div>
-              <div className="stat"><span>Today</span><b className={dayPnl >= 0 ? "up" : "down"}>{signedInr(dayPnl, 0)}</b></div>
-              <EquitySpark curve={st.curve} />
-            </div>
-          </div>
-        </div>
-      ) : null}
-
       {overlay === "objects" ? (
         <div className="term-overlay" onMouseDown={(e) => { if (e.target === e.currentTarget) setOverlay(null); }}>
           <div className="term-modal" role="dialog" aria-label="Objects">
@@ -1598,7 +1748,7 @@ export function Terminal({ userId, name }: { userId: string; name: string }) {
               <p>This will permanently clear the selected simulated trading data.</p>
               <div className="confirm-acts">
                 <button type="button" className="btn ghost" onClick={() => setOverlay(null)}>Cancel</button>
-                <button type="button" className="btn danger" onClick={() => { setStore((s) => ({ ...s, journals: {}, engine: resetAccount(s.engine, { balance: true, positions: true, orders: true, history: true }) })); setJournalId(null); setOverlay(null); toast("Paper account reset."); }}>Reset everything</button>
+                <button type="button" className="btn danger" onClick={() => { setStore((s) => ({ ...s, journals: {}, theses: {}, equityHistory: [], engine: resetAccount(s.engine, { balance: true, positions: true, orders: true, history: true }) })); setJournalId(null); setOverlay(null); toast("Paper account reset."); }}>Reset everything</button>
               </div>
             </div>
           </div>
@@ -1611,30 +1761,36 @@ export function Terminal({ userId, name }: { userId: string; name: string }) {
 
       {overlay === "replay" && !replay.on ? null : null}
 
-      {confirm?.kind === "order" && quote ? (
-        <div className="term-overlay">
-          <div className="term-modal" role="dialog" aria-label="Order summary">
-            <header><h2>Order summary</h2></header>
-            <div className="confirm-box">
-              <dl>
-                <dt>Symbol</dt><dd>{info.name}</dd>
-                <dt>Side</dt><dd>{confirm.values.side.toUpperCase()}</dd>
-                <dt>Type</dt><dd>MARKET</dd>
-                <dt>Quantity</dt><dd>{confirm.values.qty}</dd>
-                <dt>Est. price</dt><dd>{px(quote.last)}</dd>
-                <dt>Est. value</dt><dd>{inr(quote.last * confirm.values.qty)}</dd>
-              </dl>
-              {store.learningMode ? (
-                <p className="learn-hint">This is a paper fill. Confirming does not send a live order.</p>
-              ) : null}
-              <div className="confirm-acts">
-                <button type="button" className="btn ghost" onClick={() => setConfirm(null)}>Cancel</button>
-                <button type="button" className="btn" onClick={confirmOrder}>Confirm order</button>
-              </div>
-            </div>
-          </div>
-        </div>
+      {!docked && via === "sheet" && flow.step === "quantity" ? (
+        <OrderSheet onClose={order.close} label={`Order ticket for ${findSymbol(ticketSymbol).name}`}>
+          {ticketNode}
+        </OrderSheet>
       ) : null}
+      {(flow.step === "review" || flow.step === "executing") && flow.symbol ? (
+        <OrderConfirmation
+          symbol={flow.symbol}
+          side={flow.side}
+          qty={ticketQty}
+          check={ticketCheck}
+          busy={flow.step === "executing"}
+          onCancel={order.back}
+          onConfirm={order.confirm}
+        />
+      ) : null}
+      {flow.step === "success" && flow.receipt ? (
+        <OrderSuccess
+          receipt={flow.receipt}
+          onClose={order.close}
+          onView={() => {
+            const sym = flow.receipt!.symbol;
+            order.close();
+            if (docked) { setBottomTab("positions"); setStore((s) => ({ ...s, bottomCollapsed: false })); }
+            else { setDeskView("home"); }
+            void sym;
+          }}
+        />
+      ) : null}
+      {flow.step === "error" ? <OrderFailure message={flow.error ?? "The order could not be placed."} onBack={order.back} onClose={order.close} /> : null}
 
       {confirm?.kind === "close" ? (
         <div className="term-overlay">
@@ -1729,6 +1885,30 @@ export function Terminal({ userId, name }: { userId: string; name: string }) {
   );
 }
 
+function SearchHit({ info, quote, owned, onPick }: { info: ReturnType<typeof findSymbol>; quote: Quote | undefined; owned: number; onPick: () => void }) {
+  const hasPrice = !!quote && quote.last > 0;
+  const up = (quote?.changePct ?? 0) >= 0;
+  return (
+    <button type="button" className="hit pt-hit" onClick={onPick}>
+      <span className="hit-id">
+        <DeskMark info={info} />
+        <span>
+          <strong>{info.name}</strong>
+          <small>{info.symbol} · {info.exchange}{owned > 0 ? <em className="pt-owned"> · You own {owned} {owned === 1 ? "share" : "shares"}</em> : null}</small>
+        </span>
+      </span>
+      {hasPrice ? (
+        <span className="pt-hit-px">
+          <b className="mono">{inr(quote!.last)}</b>
+          <i className={up ? "up" : "down"}>{up ? "▲" : "▼"} {pct(quote!.changePct)}</i>
+        </span>
+      ) : (
+        <span className="ex">{info.indices?.[0] || info.exchange}</span>
+      )}
+    </button>
+  );
+}
+
 function DrawIcon({ id }: { id: string }) {
   const p = { width: 16, height: 16, viewBox: "0 0 16 16", fill: "none", stroke: "currentColor", strokeWidth: 1.55, strokeLinecap: "round" as const, strokeLinejoin: "round" as const };
   switch (id) {
@@ -1788,7 +1968,7 @@ function MenuFly({ children, onClose, label, pos }: { children: React.ReactNode;
 }
 
 function WatchlistPane({
-  store, setStore, quotes, quotesLoading, flashes, q, setQ, active, onPick, onTrade, onAdd, onMenu,
+  store, setStore, quotes, quotesLoading, flashes, q, setQ, active, held, onPick, onTrade, onAdd, onMenu,
 }: {
   store: PersistShape;
   setStore: (fn: (s: PersistShape) => PersistShape) => void;
@@ -1799,7 +1979,8 @@ function WatchlistPane({
   setQ: (s: string) => void;
   active: string;
   onPick: (s: string) => void;
-  onTrade: (s: string) => void;
+  held: Map<string, number>;
+  onTrade: (s: string, side: Side) => void;
   onAdd: () => void;
   onMenu: (menu: { x: number; y: number; symbol: string } | null) => void;
 }) {
@@ -1879,7 +2060,7 @@ function WatchlistPane({
             className={`wl-row ${sym === active ? "active" : ""} ${flash ? `flash-${flash}` : ""}`}
             aria-label={`${meta.symbol} ${lastText} ${chgText}`.trim()}
             onClick={() => onPick(sym)}
-            onDoubleClick={() => onTrade(sym)}
+            onDoubleClick={() => onTrade(sym, "buy")}
             onContextMenu={(e) => {
               e.preventDefault();
               onMenu({ x: e.clientX, y: e.clientY, symbol: sym });
@@ -1900,6 +2081,11 @@ function WatchlistPane({
             <span className={`last ${qq ? dir : ""}`}>{lastText}</span>
             <span className={`chg ${qq ? dir : ""}`}>{moveText}</span>
             <span className={`chgp ${qq ? dir : ""}`}>{chgText}</span>
+            <span className="wl-quick">
+              {(held.get(sym) ?? 0) > 0 ? <small>{held.get(sym)} sh</small> : null}
+              <button type="button" className="pt-mini buy" aria-label={`Buy ${meta.name}`} onClick={(e) => { e.stopPropagation(); onTrade(sym, "buy"); }}>Buy</button>
+              {(held.get(sym) ?? 0) > 0 ? <button type="button" className="pt-mini sell" aria-label={`Sell ${meta.name}`} onClick={(e) => { e.stopPropagation(); onTrade(sym, "sell"); }}>Sell</button> : null}
+            </span>
             <button
               type="button"
               className="wl-remove"
@@ -1997,79 +2183,6 @@ function IndSettings({ inst, onClose, onChange }: { inst: IndicatorInstance | un
         </div>
       </div>
     </div>
-  );
-}
-
-function JournalPane({
-  trades,
-  journals,
-  selectedId,
-  learning,
-  onSelect,
-  onNote,
-}: {
-  trades: Trade[];
-  journals: Record<string, string>;
-  selectedId: string | null;
-  learning: boolean;
-  onSelect: (id: string) => void;
-  onNote: (id: string, note: string) => void;
-}) {
-  const selected = trades.find((t) => t.id === selectedId) || trades[0] || null;
-  if (!trades.length || !selected) {
-    return (
-      <div className="empty-compact">
-        <strong>No closed trades yet</strong>
-        <p>A journal opens after you close a position so you can write what you saw and why you exited.</p>
-      </div>
-    );
-  }
-  return (
-    <div className="journal-grid">
-      <ul className="journal-list">
-        {trades.map((t) => (
-          <li key={t.id}>
-            <button type="button" className={t.id === selected.id ? "on" : ""} onClick={() => onSelect(t.id)}>
-              <span>{t.symbol} · {t.side.toUpperCase()}</span>
-              <b className={t.pnl >= 0 ? "up" : "down"}>{signedInr(t.pnl)}</b>
-            </button>
-          </li>
-        ))}
-      </ul>
-      <div className="journal-editor">
-        {learning ? (
-          <p className="learn-hint">Write the setup, the exit, and one thing you would change. Notes stay on this device.</p>
-        ) : null}
-        <p className="journal-meta">
-          {selected.symbol} · {selected.side.toUpperCase()} · {px(selected.entry)} → {px(selected.exit)} · {signedInr(selected.pnl)}
-        </p>
-        <label>
-          Trade journal note
-          <textarea
-            value={journals[selected.id] || ""}
-            rows={5}
-            placeholder="What was the setup? Why this size? What would you change?"
-            onChange={(e) => onNote(selected.id, e.target.value)}
-          />
-        </label>
-      </div>
-    </div>
-  );
-}
-
-function EquitySpark({ curve }: { curve: { t: number; v: number }[] }) {
-  if (curve.length < 2) return <p className="muted">Equity curve appears after closed trades.</p>;
-  const min = Math.min(...curve.map((c) => c.v));
-  const max = Math.max(...curve.map((c) => c.v));
-  const d = curve.map((c, i) => {
-    const x = (i / (curve.length - 1)) * 200;
-    const y = 70 - ((c.v - min) / (max - min || 1)) * 60;
-    return `${i ? "L" : "M"}${x},${y}`;
-  }).join(" ");
-  return (
-    <svg viewBox="0 0 200 80" aria-label="Equity curve">
-      <path d={d} fill="none" stroke="#6ea8ff" strokeWidth="1.5" />
-    </svg>
   );
 }
 

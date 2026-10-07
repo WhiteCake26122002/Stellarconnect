@@ -1045,3 +1045,23 @@ def fetch_financials(desk_symbol: str) -> dict:
         return assemble_financials(symbol, yahoo, info if isinstance(info, dict) else {}, income, balance, cash)
 
     return _cached(key, FINANCIALS_TTL_SECONDS, _load, lambda payload: FINANCIALS_TTL_SECONDS if payload.get("live") else 15.0)
+
+
+WARM_SYMBOLS = ["NIFTY", "BANKNIFTY", "SENSEX", "RELIANCE", "TCS", "INFY", "HDFCBANK", "ICICIBANK"]
+
+
+def warm_cache() -> None:
+    """
+    Pre-load what the terminal asks for first (the default watchlist's quotes and daily bars), so the first
+    chart a user opens is a cache hit instead of a cold round trip to Yahoo. Failures are ignored: this is only
+    a head start, and the normal request path still works without it.
+    """
+    try:
+        fetch_quotes(WARM_SYMBOLS)
+    except Exception:
+        pass
+    for symbol in WARM_SYMBOLS:
+        try:
+            fetch_ohlc(symbol, "1D")
+        except Exception:
+            pass

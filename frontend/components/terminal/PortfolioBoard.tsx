@@ -2,12 +2,15 @@
 
 import { useState } from "react";
 import { AnimatedNumber } from "@/components/AnimatedNumber";
-import { equity, invested, unrealized } from "@/lib/trading/engine";
+import { costBasis, equity, invested, totalCharges, unrealized, unrealizedNet } from "@/lib/trading/engine";
 import type { EngineState } from "@/lib/trading/engine";
 import { inr, pct, px, signedInr } from "@/lib/trading/format";
+import type { Side } from "@/lib/trading/types";
 import { findSymbol } from "@/lib/trading/universe";
 import type { Quote } from "@/lib/trading/types";
 import { DeskMark } from "./DeskMark";
+import { CostsCard } from "./CostsCard";
+import type { TaxProfile } from "@/lib/costs/tax";
 import { HoldingsPie } from "./HoldingsPie";
 import { PnlHistoryChart, PnlSpark, PositionPnlChart, PracticeStrip } from "./PnlCharts";
 import { positionSeries, type PnlSample } from "./usePnlSession";
@@ -22,6 +25,9 @@ export function PortfolioBoard({
   samples,
   cheer,
   onPick,
+  profile,
+  onOpenTax,
+  onTrade,
 }: {
   engine: EngineState;
   quotes: Map<string, Quote>;
@@ -29,13 +35,20 @@ export function PortfolioBoard({
   samples: PnlSample[];
   cheer: boolean;
   onPick: (symbol: string) => void;
+  profile: TaxProfile;
+  onOpenTax: () => void;
+  /** Opens the standard order ticket. */
+  onTrade: (symbol: string, side: Side) => void;
 }) {
   const [hover, setHover] = useState<string | null>(null);
   const [pinned, setPinned] = useState<string | null>(null);
+  // Net is after every charge paid so far; gross adds those charges back.
+  const [view, setView] = useState<"net" | "gross">("net");
   const eq = equity(engine, quotes);
   const cash = engine.account.cash;
   const open = engine.positions.filter((p) => p.status !== "closed");
-  const totalPnl = eq - engine.account.startingBalance;
+  const netPnl = eq - engine.account.startingBalance;
+  const totalPnl = view === "net" ? netPnl : netPnl + totalCharges(engine);
   const focusId = [hover, pinned].find((id) => id && open.some((p) => p.id === id)) ?? open[0]?.id ?? null;
   const focus = open.find((p) => p.id === focusId) ?? null;
 
@@ -45,6 +58,11 @@ export function PortfolioBoard({
         <div>
           <h1>Portfolio</h1>
           <p>Cash and holdings. Hover a slice or a row to match them up; click a name to open its chart.</p>
+        </div>
+        <div className="cx-pnl-toggle" role="group" aria-label="P&L view">
+          <button type="button" aria-pressed={view === "net"} onClick={() => setView("net")}>Net P&amp;L</button>
+          <button type="button" aria-pressed={view === "gross"} onClick={() => setView("gross")}>Gross P&amp;L</button>
+          <button type="button" aria-pressed="false" onClick={onOpenTax}>Capital gains →</button>
         </div>
       </header>
       <dl className="port-strip" aria-label="Portfolio totals">
@@ -61,7 +79,7 @@ export function PortfolioBoard({
           </dd>
         </div>
         <div>
-          <dt>Invested</dt>
+          <dt>Invested <span className="muted">incl. charges</span></dt>
           <dd>
             <AnimatedNumber value={invested(engine)} format={money0} />
           </dd>
@@ -73,13 +91,14 @@ export function PortfolioBoard({
           </dd>
         </div>
         <div>
-          <dt>Total P&L</dt>
+          <dt>Total P&L <span className="muted">{view === "net" ? "after charges" : "before charges"}</span></dt>
           <dd className={totalPnl >= 0 ? "up" : "down"}>
             <AnimatedNumber value={totalPnl} format={signed0} />
           </dd>
         </div>
       </dl>
       <PracticeStrip trades={engine.trades} orders={engine.orders} />
+      <CostsCard engine={engine} quotes={quotes} profile={profile} />
       <div className="port-visuals">
         <HoldingsPie positions={engine.positions} quotes={quotes} cash={cash} onPick={onPick} hover={hover} onHover={setHover} />
         <PnlHistoryChart samples={samples} />
@@ -89,7 +108,7 @@ export function PortfolioBoard({
           <table className="term-table port-table">
             <thead>
               <tr>
-                {["Symbol", "Side", "Qty", "Avg", "Last", "P&L", "P&L %", "Session"].map((h) => (
+                {["Symbol", "Side", "Qty", "Avg", "Avg cost", "Last", view === "net" ? "Net P&L" : "Gross P&L", "P&L %", "Session", ""].map((h) => (
                   <th key={h}>{h}</th>
                 ))}
               </tr>
@@ -97,7 +116,7 @@ export function PortfolioBoard({
             <tbody onMouseLeave={() => setHover(null)}>
               {open.map((p) => {
                 const last = quotes.get(p.symbol)?.last ?? p.avgPrice;
-                const pnl = unrealized(p, last);
+                const pnl = view === "net" ? unrealizedNet(p, last) : unrealized(p, last);
                 const name = findSymbol(p.symbol).name;
                 const basis = p.avgPrice * p.qty;
                 const on = hover === p.id;
@@ -111,9 +130,10 @@ export function PortfolioBoard({
                         </button>
                       </span>
                     </td>
-                    <td>{p.side.toUpperCase()}</td>
+                    <td>{p.side === "short" ? "SHORT (older)" : "LONG"}</td>
                     <td>{p.qty}</td>
                     <td>{px(p.avgPrice)}</td>
+                    <td title="Average price including the charges paid to open the position">{px(costBasis(p))}</td>
                     <td>{px(last)}</td>
                     <td className={pnl >= 0 ? "up" : "down"}>
                       <AnimatedNumber value={pnl} format={(v) => signedInr(v)} />
@@ -130,6 +150,13 @@ export function PortfolioBoard({
                       >
                         <PnlSpark points={positionSeries(samples, p.id)} label={name} />
                       </button>
+                    </td>
+                    <td>
+                      {p.side === "short" ? (
+                        <button type="button" className="pt-mini cover" onClick={() => onTrade(p.symbol, "buy")} aria-label={`Cover ${name}`}>Cover</button>
+                      ) : (
+                        <button type="button" className="pt-mini sell" onClick={() => onTrade(p.symbol, "sell")} aria-label={`Sell ${name}`}>SELL</button>
+                      )}
                     </td>
                   </tr>
                 );

@@ -2,6 +2,8 @@ import type { Metadata } from "next";
 import { FundDetail } from "@/components/funds/FundDetail";
 import "../../dcf.css";
 import "../funds.css";
+import "../funds-ui.css";
+import "../viz.css";
 
 export const metadata: Metadata = {
   title: "Fund detail · Connect",

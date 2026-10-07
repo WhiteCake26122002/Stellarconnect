@@ -207,8 +207,8 @@ export function PnlHistoryChart({ samples, height = 190, compact }: { samples: P
             }}
           />
           <Area type="linear" dataKey="day" name="Day P&L" baseValue={0} stroke={strokeFor(`${id}s`, values)} strokeWidth={1.8} fill={`url(#${id}f)`} dot={false} activeDot={{ r: 3.5 }} isAnimationActive={false} />
-          <Line type="stepAfter" dataKey="realized" name="Realized today" stroke="#6d5ef5" strokeWidth={1.3} dot={false} isAnimationActive={false} />
-          <Line type="linear" dataKey="unrealized" name="Unrealized" stroke="#3b6fbf" strokeWidth={1.3} strokeDasharray="4 3" dot={false} isAnimationActive={false} />
+          <Line type="stepAfter" dataKey="realized" name="Realized today" stroke="#aaaaaa" strokeWidth={1.3} dot={false} isAnimationActive={false} />
+          <Line type="linear" dataKey="unrealized" name="Unrealized" stroke="#4a4a4a" strokeWidth={1.3} strokeDasharray="4 3" dot={false} isAnimationActive={false} />
         </ComposedChart>
       </ResponsiveContainer>
       <ul className="pnl-legend">
@@ -216,7 +216,7 @@ export function PnlHistoryChart({ samples, height = 190, compact }: { samples: P
           <i className="swatch-day" aria-hidden /> Day P&L
         </li>
         <li>
-          <i style={{ background: "#6d5ef5" }} aria-hidden /> Realized today
+          <i style={{ background: "#aaaaaa" }} aria-hidden /> Realized today
         </li>
         <li>
           <i className="swatch-dash" aria-hidden /> Unrealized
@@ -294,7 +294,7 @@ const PARTICLES = Array.from({ length: 14 }, (_, i) => {
     dx: Math.cos(angle) * dist,
     dy: Math.sin(angle) * dist - 10,
     rot: (i * 47) % 360,
-    color: ["#3dd68c", "#2ee6de", "#f5c542", "#6ea8ff"][i % 4],
+    color: ["#111111", "#777777", "#aaaaaa", "#555555"][i % 4],
   };
 });
 

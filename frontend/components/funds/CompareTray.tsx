@@ -5,6 +5,7 @@ import { ReactNode, useEffect, useRef, useState } from "react";
 import type { FundAnalysis, FundHolding } from "@/lib/api";
 import { categoryRisk, categoryShort, planType } from "@/lib/funds/category";
 import { rupees, signedPoints, tone } from "@/lib/funds/format";
+import { benchView, pts, returnView, spanText, VERDICT_LABEL, verdictTone } from "@/lib/funds/returns";
 import { GapNote, RiskMeter } from "./FundAtoms";
 
 export const MAX_COMPARE = 4;
@@ -47,9 +48,11 @@ export function CompareTray({
 
   if (!chosen.length) return null;
 
-  const xirrByName = new Map((analysis?.funds ?? []).map((f) => [f.scheme_name, f]));
-  const xirr = (h: FundHolding) => xirrByName.get(h.scheme_name)?.xirr ?? null;
-  const benchX = (h: FundHolding) => xirrByName.get(h.scheme_name)?.benchmark_xirr ?? null;
+  const perfByCode = new Map((analysis?.funds ?? []).map((f) => [f.scheme_code, f]));
+  const perf = (h: FundHolding) => perfByCode.get(h.scheme_code);
+  const blocked = analysis?.blocked ?? [];
+  const ret = (h: FundHolding) => returnView(perf(h), blocked);
+  const bench = (h: FundHolding) => benchView(perf(h));
   const pct = (v: number | null): Cell => ({ text: <span className={tone(v)}>{signedPoints(v)}</span>, value: v });
   const rows: CompareRow[] = [
     { label: "Category", cells: chosen.map((h) => ({ text: categoryShort(h.scheme_category) })) },
@@ -63,16 +66,31 @@ export function CompareTray({
     },
     { label: "Risk (estimated)", cells: chosen.map((h) => ({ text: <RiskMeter level={categoryRisk(h.scheme_category, h.scheme_name)} /> })) },
     { label: "1Y return", best: "max", cells: chosen.map((h) => pct(h.return_1y)) },
-    { label: "Your XIRR", best: "max", cells: chosen.map((h) => pct(xirr(h))) },
-    { label: "Nifty 500, same dates", cells: chosen.map((h) => pct(benchX(h))) },
     {
-      label: "Ahead of Nifty 500",
+      label: "Return since purchase",
       best: "max",
       cells: chosen.map((h) => {
-        const a = xirr(h);
-        const b = benchX(h);
-        const v = a != null && b != null ? a - b : null;
-        return { text: <span className={tone(v)}>{v == null ? "n/a" : signedPoints(v).replace("%", " pts")}</span>, value: v };
+        const r = ret(h);
+        return { text: <span className={tone(r.value)}>{signedPoints(r.value)}<small className="muted"> {r.annualized ? "XIRR, annualized" : `over ${spanText(perf(h)?.days_held ?? 0)}`}</small></span>, value: r.value };
+      }),
+    },
+    {
+      label: "Own benchmark",
+      cells: chosen.map((h) => {
+        const b = bench(h);
+        return { text: b.available ? <span>{b.label}{b.proxy ? " (proxy)" : ""} {signedPoints(b.value)}</span> : <span className="muted">Unavailable</span> };
+      }),
+    },
+    {
+      label: "Versus benchmark",
+      best: "max",
+      cells: chosen.map((h) => {
+        const p = perf(h);
+        const v = bench(h).available ? (p?.relative_pp ?? null) : null;
+        return {
+          text: <span className={verdictTone(p?.verdict ?? "unavailable")}>{v == null ? "n/a" : pts(v)}<small className="muted"> {p ? VERDICT_LABEL[p.verdict] : ""}</small></span>,
+          value: v,
+        };
       }),
     },
     { label: "Since you bought", best: "max", cells: chosen.map((h) => pct(h.gain_pct)) },

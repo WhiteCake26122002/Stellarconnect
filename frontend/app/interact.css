@@ -1,0 +1,197 @@
+/* Interactive replacements for boxes.
+   Where a frame used to mark a choice, a field, a card or a dialog, something that responds to the pointer
+   or the keyboard marks it instead. Loaded after polish.css. Motion is opacity and transform only, and is
+   switched off for reduced-motion users at the bottom. */
+
+:root { --pl-ink: #111; }
+
+/* ---- 1. Choices: one indicator that glides, instead of a bordered box per option ------------------- */
+[data-slider] { position: relative; isolation: isolate; }
+[data-slider]::before, [data-slider]::after {
+  content: "";
+  position: absolute;
+  pointer-events: none;
+  opacity: 0;
+  transition: left 280ms var(--pl-ease), width 280ms var(--pl-ease), top 280ms var(--pl-ease), height 280ms var(--pl-ease), opacity 160ms var(--pl-ease);
+}
+[data-slider][data-ready]::before, [data-slider][data-ready]::after { opacity: 1; }
+
+/* pill strips: no frame around the group; a dark pill glides under the chosen word */
+html body [data-slider="pill"][data-slider] { background: transparent; border-color: transparent; box-shadow: none; }
+[data-slider="pill"]::before { z-index: -1; left: var(--ind-x, 0); top: var(--ind-y, 0); width: var(--ind-w, 0); height: var(--ind-h, 0); border-radius: 999px; background: var(--pl-ink); }
+[data-slider="pill"]::after { display: none; }
+html body [data-slider="pill"][data-slider] :is([aria-pressed="true"], [aria-selected="true"], [aria-checked="true"], [aria-current="page"], .on) { background: transparent; color: #fff; box-shadow: none; }
+html body [data-slider="pill"][data-slider] button:not([aria-pressed="true"], [aria-checked="true"], .on):hover { background: transparent; color: var(--pl-ink); }
+[data-slider="pill"] > * { position: relative; z-index: 1; transition: color 200ms var(--pl-ease); }
+
+/* tab strips: one underline glides between the tabs */
+[data-slider="line"]::after { left: var(--ind-x, 0); bottom: 0; width: var(--ind-w, 0); height: 2px; border-radius: 2px; background: var(--ind-color, var(--accent, #111)); }
+[data-slider="line"]::before { display: none; }
+body [data-slider="line"] :is([aria-selected="true"], [aria-pressed="true"], .on) { border-bottom-color: transparent; box-shadow: none; }
+
+/* ---- 2. Surfaces: a spotlight follows the pointer instead of a tinted tile ------------------------- */
+body .mf-card, body .cx-card, body .scenario, body .desk .scenario, body .qcat, body .cx-fundtax.cx-card {
+  position: relative;
+  background-color: transparent;
+  background-image: none;
+  border: 0;
+  border-top: 1px solid var(--pl-hair);
+  border-radius: 0;
+  box-shadow: none;
+  transform: none;
+}
+@media (hover: hover) {
+  body .mf-card:hover, body .cx-card:hover, body .scenario:hover, body .qcat:hover, body .cx-fundtax.cx-card:hover {
+    background-color: transparent;
+    background-image: radial-gradient(300px circle at var(--mx, 50%) var(--my, 50%), rgba(17, 17, 17, 0.065), transparent 75%);
+  }
+}
+/* a line draws across the top of the surface under the pointer, and stays on the chosen scenario */
+body .mf-card::before, body .cx-card::before, body .scenario::before, body .cx-fundtax.cx-card::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: -1px;
+  height: 2px;
+  width: 100%;
+  background: var(--pl-ink);
+  transform: scaleX(0);
+  transform-origin: left;
+  transition: transform 320ms var(--pl-ease);
+  pointer-events: none;
+}
+body .mf-card:hover::before, body .cx-card:hover::before, body .scenario:hover::before, body .cx-fundtax.cx-card:hover::before, body .scenario.base::before, body .scenario[aria-pressed="true"]::before { transform: scaleX(1); }
+body .scenario.base { background-color: transparent; }
+
+/* ---- 3. Fields: an underline that grows from the middle when you are in it ------------------------- */
+body :is(.desk, .shell, .cx-profile, .cx-modal, .cx-fields, .term-modal, .ticket) :is(input:not([type="checkbox"], [type="radio"], [type="range"], [type="file"], [type="color"], .global-search *), select, textarea) {
+  background-color: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--pl-hair);
+  border-radius: 0;
+  box-shadow: none;
+  background-image: linear-gradient(var(--pl-ink), var(--pl-ink));
+  background-repeat: no-repeat;
+  background-position: 50% 100%;
+  background-size: 0 2px;
+  transition: background-size 240ms var(--pl-ease), border-color 160ms var(--pl-ease);
+}
+body :is(.desk, .shell, .cx-profile, .cx-modal, .cx-fields, .term-modal, .ticket) :is(input, select, textarea):focus { background-size: 100% 2px; outline: none; border-bottom-color: transparent; }
+body :is(.desk, .shell, .cx-profile, .cx-modal, .cx-fields, .term-modal, .ticket) :is(input, select, textarea):hover:not(:focus) { border-bottom-color: rgba(17, 17, 17, 0.35); }
+
+/* ---- 4. Quiet buttons: a line sweeps under the label, no outline ---------------------------------- */
+body .btn.secondary, body .btn.ghost, body button.secondary {
+  background-color: transparent;
+  border: 0;
+  box-shadow: none;
+  background-image: linear-gradient(currentColor, currentColor);
+  background-repeat: no-repeat;
+  background-position: 0 calc(100% - 0.28rem);
+  background-size: 0 1px;
+  transition: background-size 260ms var(--pl-ease), color 140ms var(--pl-ease);
+}
+body .btn.secondary:hover:not(:disabled), body .btn.ghost:hover:not(:disabled), body button.secondary:hover:not(:disabled) { background-color: transparent; background-size: 100% 1px; }
+/* The terminal's own ghost buttons carry a border and a hover fill that outrank the rules above. */
+body .term-root .btn.ghost {
+  border: 0;
+  background-color: transparent;
+  background-image: linear-gradient(currentColor, currentColor);
+  background-repeat: no-repeat;
+  background-position: 0 calc(100% - 0.28rem);
+  background-size: 0 1px;
+  transition: background-size 260ms var(--pl-ease), color 140ms var(--pl-ease);
+}
+body .term-root .btn.ghost:hover:not(:disabled) { background-color: transparent; background-size: 100% 1px; color: #111; }
+/* In the chart header it reads as a quiet link beside the price, not a button floating over the candles. */
+body .term-chart-head .btn.ghost { min-height: 0; padding: 0 2px; font-size: 11px; font-weight: 600; color: var(--term-muted); background-position: 0 100%; }
+body .term-chart-head .btn.ghost:hover:not(:disabled) { color: #111; }
+
+/* ---- 5. Side sheets instead of centred boxes ------------------------------------------------------- */
+@keyframes pl-slide-in { from { transform: translateX(28px); opacity: 0; } to { transform: none; opacity: 1; } }
+@keyframes pl-sheet-up { from { transform: translateY(40px); opacity: 0; } to { transform: none; opacity: 1; } }
+body .cx-overlay { place-items: stretch end; padding: 0; background: rgba(10, 10, 10, 0.32); backdrop-filter: blur(2px); }
+body .cx-modal { height: 100dvh; max-height: none; width: min(28rem, 100%); border: 0; border-radius: 0; box-shadow: -18px 0 50px rgba(0, 0, 0, 0.14); animation: pl-slide-in 280ms var(--pl-ease) backwards; }
+body .cx-modal.cx-wide { width: min(42rem, 100%); }
+body .cx-modal-head { padding-top: 1.4rem; }
+@media (max-width: 640px) {
+  body .cx-overlay { place-items: end stretch; }
+  body .cx-modal, body .cx-modal.cx-wide { width: 100%; height: auto; max-height: 92dvh; border-radius: 18px 18px 0 0; animation-name: pl-sheet-up; }
+  body .cx-modal::before { content: ""; align-self: center; width: 2.4rem; height: 4px; margin-top: 8px; border-radius: 4px; background: var(--pl-hair); flex: none; }
+}
+
+/* ---- 6. Disclosures open with motion, not a snap; empty states breathe ----------------------------- */
+.cx-block details > summary, .cx-disclosure details > summary, .cx-fundtax details > summary { list-style: none; display: flex; align-items: center; gap: 0.5rem; }
+.cx-block details > summary::-webkit-details-marker, .cx-disclosure details > summary::-webkit-details-marker, .cx-fundtax details > summary::-webkit-details-marker { display: none; }
+.cx-block details > summary::before, .cx-disclosure details > summary::before, .cx-fundtax details > summary::before {
+  content: "";
+  width: 0.45rem;
+  height: 0.45rem;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: rotate(-45deg);
+  transition: transform 220ms var(--pl-ease);
+  flex: none;
+}
+.cx-block details[open] > summary::before, .cx-disclosure details[open] > summary::before, .cx-fundtax details[open] > summary::before { transform: rotate(45deg); }
+details[open] > :not(summary) { animation: pl-rise 240ms var(--pl-ease) backwards; }
+body .cx-empty { border: 0; background: transparent; padding: 1.6rem 1rem; }
+body .cx-empty::before { content: ""; display: block; width: 0.7rem; height: 0.7rem; margin: 0 auto 0.7rem; border-radius: 50%; background: var(--pl-ink); animation: pl-breathe 2.4s ease-in-out infinite; }
+@keyframes pl-breathe { 0%, 100% { transform: scale(0.7); opacity: 0.25; } 50% { transform: scale(1); opacity: 0.6; } }
+
+/* ---- 7. Rows show where you are: terminal watchlist and tables ------------------------------------- */
+.wl-row { position: relative; transition: background-color 140ms var(--pl-ease); }
+.wl-row::before { content: ""; position: absolute; left: 0; top: 18%; bottom: 18%; width: 2px; border-radius: 2px; background: var(--term-accent, #111); transform: scaleY(0); transition: transform 220ms var(--pl-ease); pointer-events: none; }
+.wl-row:hover::before, .wl-row.active::before { transform: scaleY(1); }
+.cx-table tr.cx-click:hover td:first-child { box-shadow: inset 2px 0 0 var(--pl-ink); }
+
+@media (prefers-reduced-motion: reduce) {
+  [data-slider]::before, [data-slider]::after, body .mf-card::before, body .cx-card::before, .wl-row::before { transition: none !important; }
+}
+
+/* ---- 8. Phones: the header search folds to an icon and opens over the bar when used ----------------- */
+@media (max-width: 560px) {
+  .masthead { gap: 0.5rem; padding-left: 0.75rem; padding-right: 0.75rem; }
+  .masthead .mast-tools { gap: 0.35rem; }
+  .masthead .global-search { width: 2.05rem; transition: width 220ms var(--pl-ease); }
+  .masthead .global-search input { padding: 0; color: transparent; caret-color: transparent; cursor: pointer; }
+  .masthead .global-search input::placeholder { color: transparent; }
+  .masthead .global-search:focus-within { position: fixed; z-index: 30; top: 0.7rem; left: 0.75rem; right: 0.75rem; width: auto; }
+  .masthead .global-search:focus-within input { padding-left: 2rem; color: inherit; caret-color: auto; cursor: text; }
+  .masthead .global-search:focus-within input::placeholder { color: var(--muted); }
+  .masthead .app-switch a { padding: 0 0.55rem; }
+}
+
+/* ---- 9. Figures keep their place when one of them opens an explanation ------------------------------ */
+body .funds-kpis, body .kpi-row { align-items: start; }
+body .funds-kpis .kpi .kpi-foot { margin-top: 0.15rem; }
+/* "Why this number?" opens as a quiet note with a rule beside it, not a tinted tile, and it eases in. */
+body .mf-why > div { background: transparent; border-radius: 0; padding: 0.1rem 0 0.1rem 0.7rem; border-left: 2px solid var(--pl-ink); }
+
+/* ---- 10. Remaining boxed panels become open sections: a hairline above, a rule beside, or nothing ------- */
+body :is(.streak, .goal, .port-pie, .pnl-card, .board-empty-note, .mf-overlaps li, .mf-cost-facts > div, .mf-tax-rules > div, .mf-dvr-plans > div, fieldset.mf-plan-rates) {
+  background: transparent;
+  border: 0;
+  border-top: 1px solid var(--pl-hair);
+  border-radius: 0;
+  box-shadow: none;
+}
+body :is(.port-pie, .pnl-card) { padding-left: 0; padding-right: 0; }
+body :is(.mf-period, .mf-insight) { background: transparent; border-radius: 0; border-top-width: 0; border-right-width: 0; border-bottom-width: 0; box-shadow: none; }
+body .mf-insight { border-left-width: 3px; }
+body .mf-period { border-left: 2px solid var(--pl-ink); padding-left: 0.8rem; }
+body .mf-scenario, body .mf-scenario.base { background: transparent; border: 0; border-top: 1px solid var(--pl-hair); border-radius: 0; box-shadow: none; }
+body .mf-scenario.base { border-top: 2px solid var(--pl-ink); }
+body .mf-dvr-plans > div.on { border-top: 2px solid var(--pl-ink); }
+body .mf-riskscale li.on { background: transparent; border-radius: 0; border: 0; border-left: 3px solid var(--rb, var(--pl-ink)); box-shadow: none; }
+body .port-visuals :is(.pnl-card, .port-pie) { background: transparent; box-shadow: none; }
+body .acct-grid { background: transparent; gap: 0; }
+body .acct-grid div { background: transparent; border-top: 1px solid var(--pl-hair); }
+/* a legend interrupts a fieldset's top border, so the rule is drawn inside instead */
+body fieldset.mf-plan-rates { border: 0; box-shadow: inset 0 1px 0 var(--pl-hair); }
+@media (max-width: 560px) {
+  .masthead { gap: 0.4rem; }
+  .masthead .connect-wordmark { height: 1.1rem; }
+  .masthead button.menu-btn { padding: 0 0.6rem; min-height: 1.9rem; font-size: 0.72rem; }
+  .masthead .mast-tools { gap: 0.3rem; }
+  .masthead .app-switch a { padding: 0 0.45rem; font-size: 0.72rem; }
+}

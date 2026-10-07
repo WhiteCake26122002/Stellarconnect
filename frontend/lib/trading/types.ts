@@ -1,3 +1,5 @@
+import type { ChargeBreakdown } from "../costs/charges";
+
 export type AssetClass =
   | "index"
   | "stock"
@@ -31,7 +33,13 @@ export type ChartType =
   | "linebreak";
 
 export type Side = "buy" | "sell";
-export type OrderType = "market" | "limit" | "stop" | "stop_limit";
+/**
+ * New orders are always delivery. "intraday" survives only so a position saved before the desk became
+ * long-only can still be read and closed; nothing can open one.
+ */
+export type Product = "delivery" | "intraday";
+/** Paper trading takes market orders only. The user never chooses a type. */
+export type OrderType = "market";
 export type OrderStatus = "pending" | "filled" | "partial" | "cancelled" | "rejected";
 export type PositionStatus = "open" | "partial" | "closed";
 
@@ -174,22 +182,56 @@ export type Order = {
   qty: number;
   filledQty: number;
   price?: number;
-  trigger?: number;
   status: OrderStatus;
   rejectReason?: string;
   replay?: boolean;
+  product?: Product;
+};
+
+/** One purchase inside a position: the unit that tax and FIFO work on. */
+export type Lot = {
+  id: string;
+  /** Quantity still open in this lot. */
+  qty: number;
+  /** Execution price, before charges. */
+  price: number;
+  openedAt: number;
+  /** Charges paid on the opening fill that belong to the quantity still open. */
+  openCharges: number;
+  /** The STT inside those charges. */
+  openStt: number;
 };
 
 export type Position = {
   id: string;
   symbol: string;
+  /** Always "long" for anything opened now. "short" only appears on a position saved before the desk was long-only. */
   side: "long" | "short";
   qty: number;
   avgPrice: number;
-  sl?: number;
-  tp?: number;
   openedAt: number;
   status: PositionStatus;
+  product?: Product;
+  /** Open lots, oldest first. Positions saved before lots existed get one lot built from avgPrice. */
+  lots?: Lot[];
+};
+
+/** The part of a closing fill that matched one lot. */
+export type TradeSlice = {
+  qty: number;
+  openedAt: number;
+  openPrice: number;
+  closePrice: number;
+  openCharges: number;
+  closeCharges: number;
+  openStt: number;
+  closeStt: number;
+  /** Price move only. */
+  gross: number;
+  /** Gross less every charge on both legs. */
+  net: number;
+  /** Gross less the deductible charges: the capital gain for tax. */
+  taxable: number;
 };
 
 export type Trade = {
@@ -204,15 +246,39 @@ export type Trade = {
   pnl: number;
   returnPct: number;
   durationMs: number;
+  /** All charges on both legs of this trade. */
   fees: number;
+  replay?: boolean;
+  product?: Product;
+  /** Price move only, before charges. `pnl` is after charges. */
+  grossPnl?: number;
+  slices?: TradeSlice[];
+};
+
+/** One execution in the ledger: what was traded and every charge on it. */
+export type Fill = {
+  id: string;
+  time: number;
+  orderId: string;
+  symbol: string;
+  side: Side;
+  qty: number;
+  price: number;
+  product: Product;
+  /** quantity x price. */
+  gross: number;
+  charges: ChargeBreakdown;
+  /** Debit for a buy (gross + charges), credit for a sell (gross - charges). */
+  net: number;
   replay?: boolean;
 };
 
 export type FeeConfig = {
-  brokeragePct: number;
-  txnPct: number;
-  taxPct: number;
   slippagePct: number;
+  /** Key of the broker profile in the central charge configuration. */
+  profileId: string;
+  /** Your own brokerage numbers, used when profileId is 'custom'. */
+  custom?: Partial<Record<"equityDelivery" | "equityIntraday" | "futures" | "options", { pct?: number; flat?: number; cap?: number; min?: number }>> & { dpChargePerScripSell?: number };
 };
 
 export type PaperAccount = {

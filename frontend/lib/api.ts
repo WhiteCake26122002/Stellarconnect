@@ -128,8 +128,38 @@ export const api = {
     request<FundQuote>(`/v1/funds/schemes/${code}`, { signal }),
   fundPortfolio: (signal?: AbortSignal) => request<FundPortfolio>("/v1/funds", { signal }),
   fundAnalysis: (signal?: AbortSignal) => request<FundAnalysis>("/v1/funds/analysis", { signal }),
-  addFund: (body: { scheme_code: number; units: number; avg_nav?: number; purchase_date?: string }) =>
+  fundInsights: (profile: FundProfile, signal?: AbortSignal) => {
+    const params = new URLSearchParams();
+    for (const [key, value] of Object.entries(profile)) if (value) params.set(key, value);
+    const qs = params.toString();
+    return request<FundInsights>(`/v1/funds/insights${qs ? `?${qs}` : ""}`, { signal });
+  },
+  fundHistory: (code: number, signal?: AbortSignal) => request<FundHistory>(`/v1/funds/schemes/${code}/history`, { signal }),
+  fundContext: (signal?: AbortSignal) => request<FundContext>("/v1/funds/context", { signal }),
+  fundNavOn: (code: number, date: string, signal?: AbortSignal) =>
+    request<FundNavOn>(`/v1/funds/schemes/${code}/nav?date=${encodeURIComponent(date)}`, { signal }),
+  /** Either `units` (as on a statement, already net of stamp duty) or `amount` (the money paid; stamp duty comes out of it). */
+  addFund: (body: { scheme_code: number; units?: number; amount?: number; avg_nav?: number; purchase_date?: string }) =>
     request<FundPortfolio>("/v1/funds/holdings", { method: "POST", body: JSON.stringify(body) }),
+  fundSip: (body: { scheme_code: number; amount: number; day_of_month: number; start_date: string; installments?: number; end_date?: string }) =>
+    request<FundPortfolio & { sip: { instalments: number; skipped: number; first: string; last: string; amount: number } }>("/v1/funds/sip", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  redeemFund: (code: number, body: { units?: number; all?: boolean; nav?: number; date?: string }) =>
+    request<FundPortfolio>(`/v1/funds/holdings/${code}/redeem`, { method: "POST", body: JSON.stringify(body) }),
+  fundRedeemPreview: (code: number, body: { units?: number; all?: boolean; nav?: number; date?: string; slab_rate_pct?: number | null; income_band?: string | null; regime?: "new" | "old" }, signal?: AbortSignal) =>
+    request<FundRedeemPreview>(`/v1/funds/holdings/${code}/redeem-preview`, { method: "POST", body: JSON.stringify(body), signal }),
+  fundTax: (params: Record<string, string>, signal?: AbortSignal) => {
+    const qs = new URLSearchParams(params).toString();
+    return request<FundTaxView>(`/v1/funds/tax${qs ? `?${qs}` : ""}`, { signal });
+  },
+  fundSchemeTax: (code: number, signal?: AbortSignal) => request<FundSchemeTax>(`/v1/funds/schemes/${code}/tax`, { signal }),
+  saveFundSettings: (code: number, body: { tax_class?: "equity" | "specified" | "other" | null; exit_load?: { days: number; pct: number }[] | null }) =>
+    request<{ scheme_code: number; tax_class: string | null; exit_load: { days: number; pct: number }[] | null }>(`/v1/funds/schemes/${code}/settings`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
   removeFund: (code: number) => request<FundPortfolio>(`/v1/funds/holdings/${code}`, { method: "DELETE" }),
 };
 
@@ -142,13 +172,31 @@ export type FundQuote = {
   scheme_category: string;
   nav: number;
   nav_date: string;
+  inception_date?: string;
+  /** Point-to-point NAV change in percent; a window the history does not reach is null. */
+  changes?: { d1: number | null; m1: number | null; m3: number | null; y1: number | null };
 };
+
+/** A scheme's published NAV path, with its own benchmark's closes on the same dates when one exists. */
+export type FundHistory = {
+  scheme_code: number;
+  scheme_name: string;
+  category: string;
+  inception_date: string;
+  as_of: string;
+  points: { date: string; nav: number; bench: number | null }[];
+  benchmark: { key: string; label: string; proxy: boolean; note: string; basis: string } | null;
+  benchmark_reason: string | null;
+};
+
+export type FundNavOn = { scheme_code: number; requested: string; nav_date: string; nav: number };
 
 export type FundHolding = {
   scheme_code: number;
   scheme_name: string;
   scheme_category: string;
   fund_house: string;
+  plan: "Direct" | "Regular" | "Unknown";
   units: number;
   avg_nav: number;
   current_nav: number | null;
@@ -159,34 +207,395 @@ export type FundHolding = {
   gain_pct: number | null;
   return_1y: number | null;
   purchase_date: string;
+  days_held: number | null;
+  weight_pct: number | null;
   data_available: boolean;
 };
 
-export type FundFlag = { severity: "warning" | "info"; title: string; detail: string };
-
 export type FundPortfolio = {
   holdings: FundHolding[];
-  totals: { invested: number; value: number; gain: number; gain_pct: number | null };
-  flags: FundFlag[];
+  totals: { invested: number; value: number; gain: number; gain_pct: number | null; as_of: string | null };
   disclaimer: string;
 };
 
 export type FundSlice = { label: string; pct: number };
 
+/** The window a figure was measured over, as the server worked it out. */
+export type FundPeriod = { start: string; end: string; days: number; label: string; annualizable: boolean };
+
+/** An annualized return, or the reason it is withheld. */
+export type FundXirr = {
+  value: number | null;
+  annualized: boolean;
+  status: "ok" | "short_history" | "insufficient" | "unsolvable";
+  days: number;
+  note: string;
+};
+
+export type FundVerdict = "outperformed" | "underperformed" | "in_line" | "tracking" | "too_early" | "unavailable";
+
+export type FundBenchmark = {
+  key: string | null;
+  ticker: string | null;
+  label: string | null;
+  proxy: boolean;
+  note: string;
+  reason: string | null;
+  return_pct: number | null;
+  status: "available" | "no_mapping" | "no_data";
+};
+
+export type FundCheck = { id: string; status: "ok" | "info" | "warn" | "block"; message: string; affects: string[] };
+
+export type FundDataQuality = {
+  metric: string;
+  status: "available" | "unavailable";
+  source: string;
+  as_of: string | null;
+  period: FundPeriod | null;
+  note: string;
+};
+
 export type FundAnalysis = {
   ready: boolean;
-  xirr: number | null;
-  benchmarks: { label: string; xirr: number | null }[];
-  benchmarks_beaten?: number;
-  benchmarks_compared?: number;
-  funds: { scheme_name: string; xirr: number | null; benchmark_xirr: number | null }[];
+  as_of: string | null;
+  period: FundPeriod | null;
+  portfolio: {
+    value: number;
+    total_invested: number;
+    realised_proceeds: number;
+    gain: number;
+    absolute_return_pct: number | null;
+    xirr: FundXirr;
+    cagr_pct: number | null;
+    twr_pct: number | null;
+    single_date: boolean;
+    nav_entries_match: boolean;
+    transactions: number;
+    transactions_source: "recorded" | "aggregated";
+    period: FundPeriod;
+  } | null;
+  benchmarks: {
+    key: string;
+    label: string;
+    ticker: string;
+    source: string;
+    basis: string;
+    /** The same rupees, on the same dates, in the index. */
+    return_pct: number | null;
+    /** The index's own move between the first purchase and the end date. */
+    index_move_pct: number | null;
+    xirr: FundXirr | null;
+    period: FundPeriod;
+    /** Portfolio return minus this index's, in percentage points, plus a verdict once 30+ days have passed. */
+    relative_pp: number | null;
+    verdict: FundVerdict;
+    verdict_text: string;
+    start_date_used?: string;
+    end_date_used?: string;
+  }[];
+  funds: {
+    scheme_code: number;
+    scheme_name: string;
+    scheme_category: string;
+    value: number;
+    invested: number;
+    period: FundPeriod;
+    first_purchase: string;
+    days_held: number;
+    weighted_age_days: number;
+    purchases: number;
+    fund_return_pct: number | null;
+    xirr: FundXirr;
+    benchmark: FundBenchmark;
+    relative_pp: number | null;
+    verdict: FundVerdict;
+    verdict_text: string;
+  }[];
+  checks: FundCheck[];
+  /** Metric ids the consistency checks withheld (for example "xirr", "growth"). */
+  blocked?: string[];
+  data_quality: FundDataQuality[];
   asset_allocation: FundSlice[];
   market_cap: FundSlice[];
   amc: FundSlice[];
-  growth: { date: string; portfolio: number | null; benchmarks: Record<string, number | null> }[];
+  /** Rupee value path: portfolio, net money in, and the same rupees in each index. */
+  growth: { date: string; portfolio: number | null; invested: number; benchmarks: Record<string, number | null> }[];
+  /** Time-weighted index, 100 at the first purchase, for the portfolio and each index. */
+  performance: { date: string; portfolio: number; benchmarks: Record<string, number | null> }[];
   notes: string[];
   disclaimer: string;
   lookthrough: string;
+};
+
+export type FundWindowCagr = { cagr_pct: number; start: string; end: string; days: number; total_pct: number };
+
+export type FundContext = {
+  as_of: string | null;
+  indices: { key: string; label: string; five_year: FundWindowCagr | null; ten_year: FundWindowCagr | null }[];
+  basis: string;
+  note: string;
+};
+
+export type FundProfile = { age?: string; horizon?: string; risk?: string; objective?: string; slab?: string; band?: string; regime?: string };
+
+// --- costs and tax --------------------------------------------------------------------------------
+
+export type FundTaxClass = "equity" | "specified" | "other" | "unknown";
+
+export type FundClassification = {
+  tax_class: FundTaxClass;
+  label: string;
+  detail: string;
+  certainty: "category" | "depends" | "override";
+  reason: string;
+  source: "category" | "override";
+  rule: string;
+};
+
+export type TaxConfidence = {
+  level: "high" | "estimated" | "incomplete";
+  label: string;
+  coverage_pct: number;
+  reasons: string[];
+  basis: string;
+};
+
+export type TaxBucketResult = {
+  bucket: "stcg111A" | "ltcg112A" | "stcgSlab" | "ltcg112";
+  label: string;
+  rate_pct: number | null;
+  gains: number;
+  losses: number;
+  net: number;
+  net_after_set_off: number;
+  exemption: number;
+  taxable: number;
+  tax: number | null;
+};
+
+export type TaxEstimate = {
+  supported: boolean;
+  reason: string | null;
+  fy: string;
+  fy_label: string;
+  rules: { source_fy: string; assumed: boolean; note: string | null; legal_basis: string } | null;
+  buckets: Record<TaxBucketResult["bucket"], TaxBucketResult>;
+  stcg: number;
+  ltcg: number;
+  realized_net: number;
+  exemption_limit: number;
+  exemption_applied: number;
+  exemption_room: number;
+  tax_before_surcharge_cess: number;
+  surcharge: number;
+  cess: number;
+  total: number;
+  includes_surcharge_cess: boolean;
+  slab_gain_not_estimated: number;
+  unabsorbed_loss: { short: number; long: number };
+  headline: string;
+  notes: string[];
+};
+
+export type FundTaxItem = {
+  id: string;
+  scheme_code: number;
+  label: string;
+  bucket: TaxBucketResult["bucket"];
+  gain: number;
+  term: "short" | "long";
+  held_text: string;
+  opened_on: string;
+  closed_on: string;
+  units: number;
+  cost: number;
+  proceeds: number;
+  exit_load: number;
+  stt: number;
+  gross: number;
+  net: number;
+  deemed_short_term: boolean;
+  tax: number;
+};
+
+export type FundTaxLot = {
+  buy_date: string;
+  units: number;
+  cost: number;
+  value: number;
+  gain: number;
+  term: "short" | "long";
+  deemed_short_term: boolean;
+  held_text: string;
+  held_days: number;
+  bucket: TaxBucketResult["bucket"];
+  bucket_label: string;
+  long_term_from: string | null;
+  exit_load: number;
+  source: string;
+};
+
+export type FundExitLoadInfo = {
+  status: "applied" | "none" | "unavailable";
+  amount_if_redeemed: number | null;
+  terms: { days: number; pct: number }[] | null;
+  text: string;
+  source: string | null;
+};
+
+export type FundTaxFund = {
+  scheme_code: number;
+  scheme_name: string;
+  category: string;
+  classification: FundClassification;
+  invested: number;
+  value: number;
+  unrealized_gain: number;
+  first_purchase: string | null;
+  lots: FundTaxLot[];
+  lot_count: number;
+  short_term_units: number;
+  long_term_units: number;
+  short_term_gain: number;
+  long_term_gain: number;
+  taxable_gain: number;
+  tax_if_redeemed: number | null;
+  tax_basis: string;
+  exit_load: FundExitLoadInfo;
+  stt_if_redeemed: number;
+  note: string;
+};
+
+export type FundTaxView = {
+  fy: string;
+  fy_label: string;
+  current_fy: string;
+  as_of: string;
+  years: { fy: string; label: string }[];
+  profile: { slab_rate_pct: number | null; income_band: string | null; regime: string };
+  realized: {
+    fy: string;
+    fy_label: string;
+    gain: number;
+    stcg: number;
+    ltcg: number;
+    gross: number;
+    charges: number;
+    exit_load: number;
+    stt: number;
+    net_before_tax: number;
+    costs: { stamp_duty: number; exit_load: number; stt: number };
+    estimate: TaxEstimate;
+    items: FundTaxItem[];
+    by_fund: { scheme_code: number; scheme_name: string; gain: number; stcg: number; ltcg: number; tax: number; exit_load: number; stt: number }[];
+    confidence: TaxConfidence;
+    after_tax: { gross_return_pct: number | null; net_return_pct: number | null; after_tax_return_pct: number | null; tax: number | null; after_tax_pnl: number | null; label: string } | null;
+  };
+  unrealized: {
+    gain: number;
+    short_term_gain: number;
+    long_term_gain: number;
+    exit_load: number;
+    stt: number;
+    potential_tax: number | null;
+    potential_tax_basis: string;
+    confidence: TaxConfidence;
+    note: string;
+    estimate: TaxEstimate;
+  };
+  funds: FundTaxFund[];
+  rules: TaxEstimate["rules"];
+  headline: string;
+  history_note: string;
+  disclosure: string;
+  cost_notes: { stamp_duty: string; stt: string; distributor_charge: string; expense_ratio: string; exit_load: string };
+  classes: Record<string, { label: string; short: string; detail: string }>;
+};
+
+export type FundRedeemPreview = {
+  scheme_code: number;
+  scheme_name: string;
+  classification: FundClassification;
+  units: number;
+  all_units: boolean;
+  nav: number;
+  date: string;
+  fy: string;
+  fy_label: string;
+  gross: number;
+  cost: number;
+  exit_load: { status: "applied" | "none" | "unavailable"; amount: number | null; terms: { days: number; pct: number }[] | null; text: string; source: string | null };
+  stt: { amount: number; rate_pct: number; note: string | null };
+  proceeds_after_charges: number;
+  lots: {
+    buy_date: string;
+    units: number;
+    cost: number;
+    proceeds: number;
+    exit_load: number;
+    stt: number;
+    taxable_gain: number;
+    term: "short" | "long";
+    held_text: string;
+    bucket: TaxBucketResult["bucket"];
+    bucket_label: string;
+    deemed_short_term: boolean;
+    tax: number;
+  }[];
+  short_term_gain: number;
+  long_term_gain: number;
+  taxable_gain: number;
+  estimated_tax: number | null;
+  tax_basis: string;
+  estimated_net_proceeds: number | null;
+  exemption_room_after: number | null;
+  confidence: TaxConfidence;
+  notes: string[];
+  history_note: string;
+  disclosure: string;
+  after_tax: { label: string; value: number | null; return_pct: number | null };
+};
+
+export type FundSchemeTax = {
+  scheme_code: number;
+  scheme_name: string;
+  category: string;
+  classification: FundClassification;
+  rules: { short_term: string; long_term: string; threshold_months: number | null; fy: string };
+  exit_load: { status: "entered" | "unavailable"; terms: { days: number; pct: number }[] | null; text: string; source: string | null; note: string };
+  expense_ratio_note: string;
+  disclosure: string;
+  classes: Record<string, { label: string; short: string; detail: string }>;
+};
+
+export type FundInsight = {
+  id: string;
+  category: string;
+  severity: "high" | "medium" | "info";
+  title: string;
+  why: string;
+  review: string;
+  evidence: string[];
+  score: number;
+};
+
+export type FundInsights = {
+  insights: FundInsight[];
+  also_noted: FundInsight[];
+  suitability: {
+    profile: string;
+    equity_pct: number;
+    reference_low: number;
+    reference_high: number;
+    status: "above" | "within" | "below";
+    high_risk_equity_pct: number;
+    hybrid_pct: number;
+    text: string;
+  } | null;
+  stats: { funds: number; categories?: number; amcs?: number; equity_pct?: number; high_risk_equity_pct?: number; hybrid_pct?: number; regular_pct?: number };
+  profile: { age: string | null; horizon: string | null; risk: string | null; objective: string | null; label: string; complete: boolean };
+  disclaimer: string;
 };
 
 export type LiveQuote = {

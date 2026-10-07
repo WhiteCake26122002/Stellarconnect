@@ -1,0 +1,133 @@
+/* Fewer boxes, steadier motion.
+   Loaded after the page styles. Sections are separated by space and a hairline instead of a border on every
+   panel; the few things that really are objects (a fund, a model, a dialog) keep a soft surface and no outline.
+   Motion is short, uses only opacity and transform (so nothing reflows), and is switched off for anyone who
+   asks their system for reduced motion. */
+
+:root {
+  --pl-hair: rgba(17, 17, 17, 0.09);
+  --pl-soft: rgba(17, 17, 17, 0.035);
+  --pl-rise: 8px;
+  --pl-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+/* No width jump when a page grows a scrollbar. */
+html { scrollbar-gutter: stable; }
+
+/* ---- Sections instead of boxes ------------------------------------------------------------------ */
+body .card.card {
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  padding-left: 0;
+  padding-right: 0;
+}
+body .desk .card.card + .card.card,
+body .desk .page-head + .card.card { border-top: 1px solid var(--pl-hair); }
+
+/* Figures in a row read as one strip, divided by hairlines, not as a row of tiles. */
+body .kpi.kpi, body button.kpi.kpi {
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  min-height: 0;
+  padding: 0.35rem 1.25rem 0.35rem 0;
+}
+body .funds-kpis, body .kpi-row { gap: 0; }
+body .funds-kpis .kpi + .kpi, body .kpi-row .kpi + .kpi { border-left: 1px solid var(--pl-hair); padding-left: 1.25rem; }
+
+/* Banners and notices: a rule on one side, no frame. */
+body .banner { background: transparent; border: 0; border-left: 3px solid currentColor; border-radius: 0; padding: 0.35rem 0.8rem; }
+
+/* Fund cards and similar objects: a soft surface, no outline, a gentle lift. */
+body .mf-card, body .mf-card.mf-card {
+  background: var(--pl-soft);
+  border: 0;
+  box-shadow: none;
+  transition: transform 160ms var(--pl-ease), background-color 160ms var(--pl-ease);
+}
+body .mf-card:hover { background: rgba(17, 17, 17, 0.055); transform: translateY(-1px); }
+
+/* The terminal's and funds' shared blocks (charges, tax, ladders, cards). */
+body .cx-card { border: 0; background: var(--pl-soft); border-radius: 10px; }
+body .cx-ladder { border: 0; padding: 0; background: transparent; }
+body .cx-table-wrap { border: 0; border-radius: 0; }
+body .cx-table th { background: transparent; border-bottom: 1px solid var(--pl-hair); }
+body .cx-table td { border-bottom-color: var(--pl-hair); }
+body .cx-block details, body .cx-disclosure details, body .cx-summary details { border: 0; border-top: 1px solid var(--pl-hair); border-radius: 0; padding-left: 0; padding-right: 0; }
+body .cx-glist li { border: 0; border-bottom: 1px solid var(--pl-hair); border-radius: 0; padding-left: 0; padding-right: 0; }
+body .cx-glist.plain li { border-bottom: 0; }
+body .cx-profile { border: 0; border-top: 1px solid var(--pl-hair); border-radius: 0; padding-left: 0; padding-right: 0; }
+body .cx-important { background: transparent; border: 0; border-left: 3px solid var(--cx-ink, #111); border-radius: 0; }
+body .cx-fundtax.cx-card { padding: 1rem 1.1rem; }
+body .cx-pop { border: 0; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.16); }
+
+/* The empty states that were a card around one sentence. */
+body .empty-state, body .funds-empty { border: 0; background: transparent; box-shadow: none; }
+
+/* ---- Entrances ---------------------------------------------------------------------------------- */
+@keyframes pl-rise { from { opacity: 0; transform: translateY(var(--pl-rise)); } to { opacity: 1; transform: none; } }
+@keyframes pl-fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes pl-pop { from { opacity: 0; transform: translateY(6px) scale(0.985); } to { opacity: 1; transform: none; } }
+
+/* A page, a board or a tab panel eases in once when it mounts. */
+.shell, .board-page, .mf-tabpanel > *, .funds-analysis, .route-skeleton { animation: pl-rise 240ms var(--pl-ease) backwards; }
+
+/* Items in a grid arrive one after another; capped so a long list never waits. */
+.mf-cards > *, .cx-cards > *, .cx-fundgrid > *, .funds-kpis > *, .kpi-row > *, .metric-row > * { animation: pl-rise 260ms var(--pl-ease) backwards; }
+:is(.mf-cards, .cx-cards, .cx-fundgrid, .funds-kpis, .kpi-row, .metric-row) > :nth-child(2) { animation-delay: 40ms; }
+:is(.mf-cards, .cx-cards, .cx-fundgrid, .funds-kpis, .kpi-row, .metric-row) > :nth-child(3) { animation-delay: 80ms; }
+:is(.mf-cards, .cx-cards, .cx-fundgrid, .funds-kpis, .kpi-row, .metric-row) > :nth-child(4) { animation-delay: 120ms; }
+:is(.mf-cards, .cx-cards, .cx-fundgrid, .funds-kpis, .kpi-row, .metric-row) > :nth-child(5) { animation-delay: 160ms; }
+:is(.mf-cards, .cx-cards, .cx-fundgrid, .funds-kpis, .kpi-row, .metric-row) > :nth-child(n + 6) { animation-delay: 200ms; }
+
+/* Dialogs fade in and settle; the scrim fades. */
+.cx-overlay, .term-overlay { animation: pl-fade 160ms var(--pl-ease) backwards; }
+.cx-modal, .term-modal { animation: pl-pop 200ms var(--pl-ease) backwards; }
+.term-toast, .toast-item { animation: pl-rise 200ms var(--pl-ease) backwards; }
+
+/* Hover and press feel: quick, small. */
+button, .btn, a.btn, [role="tab"], .cx-tabs button, .cx-seg button { transition: background-color 140ms var(--pl-ease), color 140ms var(--pl-ease), transform 120ms var(--pl-ease), box-shadow 140ms var(--pl-ease), opacity 140ms var(--pl-ease); }
+button:active:not(:disabled), .btn:active:not(:disabled) { transform: scale(0.98); }
+.cx-table tr.cx-click { transition: background-color 120ms var(--pl-ease); }
+
+/* Tab underline slides rather than snaps. */
+.funds-tabs [role="tab"] { position: relative; }
+
+/* Loading placeholders keep their shape so nothing jumps when the content arrives. */
+.skel { background-size: 200% 100%; }
+.route-skeleton { display: grid; gap: 0.7rem; padding: 1.2rem 0; }
+
+/* Keyboard focus is always visible, never a surprise outline on mouse use. */
+:focus-visible { outline: 2px solid var(--cx-ink, #111); outline-offset: 2px; }
+:focus:not(:focus-visible) { outline: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.001ms !important; animation-delay: 0ms !important; transition-duration: 0.001ms !important; scroll-behavior: auto !important; }
+}
+
+/* A row of figures is a strip with hairlines, like the funds' headline numbers, not a row of tiles. */
+@media (min-width: 720px) {
+  body .cx-cards { gap: 0; }
+  body .cx-cards .cx-card { background: transparent; border-radius: 0; padding: 0.35rem 1.1rem; }
+  body .cx-cards .cx-card:first-child { padding-left: 0; }
+  body .cx-cards .cx-card + .cx-card { border-left: 1px solid var(--pl-hair); }
+}
+
+/* ---- The valuation workspace ---------------------------------------------------------------------- */
+body .company-hero { background: transparent; border: 0; border-radius: 0; box-shadow: none; padding: 0.4rem 0 0.9rem; border-bottom: 1px solid var(--pl-hair); }
+body .hero-price { background: transparent; border: 0; border-radius: 0; padding: 0; }
+body .rev-bridge div { background: transparent; border: 0; border-radius: 0; padding: 0.3rem 0; }
+body .datacheck-bar { background: transparent; border: 0; border-left: 3px solid currentColor; border-radius: 0; box-shadow: none; }
+body .qcat, body .qcat.verified { background: transparent; border: 0; border-bottom: 1px solid var(--pl-hair); border-radius: 0; }
+body .scenario, body .scenario.base { border: 0; box-shadow: none; background: var(--pl-soft); }
+body .guide-section { background: transparent; border: 0; border-bottom: 1px solid var(--pl-hair); border-radius: 0; box-shadow: none; }
+
+/* ---- The chart while its bars load ------------------------------------------------------------------ */
+.term-chart-wrap { position: relative; }
+.chart-skeleton { position: absolute; inset: 12% 8% 14% 4%; display: flex; align-items: flex-end; gap: 1.1%; pointer-events: none; }
+.chart-skeleton span { flex: 1; border-radius: 3px; background: linear-gradient(90deg, rgba(17, 17, 17, 0.06), rgba(17, 17, 17, 0.12), rgba(17, 17, 17, 0.06)); background-size: 200% 100%; animation: pl-shimmer 1.2s ease-in-out infinite; }
+@keyframes pl-shimmer { from { background-position: 100% 0; } to { background-position: -100% 0; } }
+.term-chart-canvas { animation: pl-fade 260ms var(--pl-ease) backwards; }

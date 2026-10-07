@@ -1,0 +1,68 @@
+/* The loader shown while a desk opens. One small drawing per desk, in the page's ink; no panel around it.
+   Opacity, transform and stroke offsets only, and switched off for reduced motion. */
+
+.ml-root {
+  --ml-ink: #111;
+  --ml-soft: rgba(17, 17, 17, 0.14);
+  display: grid;
+  justify-items: center;
+  align-content: center;
+  gap: 0.35rem;
+  min-height: min(62vh, 30rem);
+  padding: 2rem 1rem;
+  color: var(--ml-ink);
+  text-align: center;
+  animation: ml-in 280ms cubic-bezier(0.2, 0.8, 0.2, 1) backwards;
+}
+.ml-root.compact { min-height: 14rem; }
+@keyframes ml-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+
+.ml-art { width: min(15rem, 62vw); height: auto; margin-bottom: 0.9rem; overflow: visible; }
+.ml-title { margin: 0; font-size: 1.05rem; font-weight: 700; letter-spacing: -0.02em; }
+.ml-line { margin: 0; color: #6a6a6a; font-size: 0.82rem; display: inline-flex; align-items: baseline; gap: 0.15rem; }
+.ml-dots { display: inline-flex; gap: 2px; margin-left: 0.2rem; }
+.ml-dots i { width: 3px; height: 3px; border-radius: 50%; background: currentColor; animation: ml-dot 1.1s ease-in-out infinite; }
+.ml-dots i:nth-child(2) { animation-delay: 140ms; }
+.ml-dots i:nth-child(3) { animation-delay: 280ms; }
+@keyframes ml-dot { 0%, 80%, 100% { opacity: 0.2; transform: translateY(0); } 40% { opacity: 1; transform: translateY(-2px); } }
+
+/* paper trading: candles grow from their base, then the price line is drawn through them */
+.ml-candle { transform-box: fill-box; transform-origin: 50% 100%; animation: ml-grow 1.6s cubic-bezier(0.2, 0.8, 0.2, 1) infinite; }
+.ml-candle line { stroke: var(--ml-ink); stroke-width: 1.4; stroke-linecap: round; }
+.ml-candle rect { fill: var(--ml-ink); }
+.ml-candle[data-up="false"] rect { fill: #fff; stroke: var(--ml-ink); stroke-width: 1.4; }
+@keyframes ml-grow {
+  0% { transform: scaleY(0); opacity: 0; }
+  28%, 78% { transform: scaleY(1); opacity: 1; }
+  100% { transform: scaleY(1); opacity: 0; }
+}
+.ml-pricepath { fill: none; stroke: var(--ml-ink); stroke-width: 1.6; stroke-linecap: round; stroke-dasharray: 260; stroke-dashoffset: 260; animation: ml-draw 1.6s ease-in-out infinite; opacity: 0.55; }
+@keyframes ml-draw { 0%, 10% { stroke-dashoffset: 260; } 60%, 85% { stroke-dashoffset: 0; } 100% { stroke-dashoffset: -260; } }
+
+/* funds: a ring that closes, and three holdings that fill their slots */
+.ml-ring-track { fill: none; stroke: var(--ml-soft); stroke-width: 9; }
+.ml-ring { fill: none; stroke: var(--ml-ink); stroke-width: 9; stroke-linecap: round; stroke-dasharray: 100; stroke-dashoffset: 100; transform: rotate(-90deg); transform-origin: 48px 50px; animation: ml-ring 2s cubic-bezier(0.5, 0, 0.2, 1) infinite; }
+@keyframes ml-ring { 0% { stroke-dashoffset: 100; } 60%, 85% { stroke-dashoffset: 24; } 100% { stroke-dashoffset: 24; opacity: 0.2; } }
+.ml-slot { fill: var(--ml-soft); }
+.ml-fill { fill: var(--ml-ink); transform-box: fill-box; transform-origin: 0 50%; animation: ml-fillbar 2s cubic-bezier(0.2, 0.8, 0.2, 1) infinite; }
+@keyframes ml-fillbar { 0% { transform: scaleX(0); } 50%, 85% { transform: scaleX(1); } 100% { transform: scaleX(1); opacity: 0.25; } }
+
+/* DCF: a waterfall whose steps drop in one at a time and settle on the total */
+.ml-base { stroke: var(--ml-soft); stroke-width: 1.4; }
+.ml-step { fill: var(--ml-soft); transform-box: fill-box; transform-origin: 50% 0; animation: ml-drop 2s cubic-bezier(0.2, 0.8, 0.2, 1) infinite; }
+.ml-step[data-total="true"] { fill: var(--ml-ink); }
+.ml-link { stroke: var(--ml-ink); stroke-width: 1; stroke-dasharray: 2 2; opacity: 0.4; }
+@keyframes ml-drop {
+  0% { transform: scaleY(0); opacity: 0; }
+  30%, 80% { transform: scaleY(1); opacity: 1; }
+  100% { transform: scaleY(1); opacity: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ml-candle, .ml-pricepath, .ml-ring, .ml-fill, .ml-step, .ml-dots i { animation: none; }
+  .ml-pricepath { stroke-dashoffset: 0; }
+  .ml-ring { stroke-dashoffset: 24; }
+}
+
+/* inside the terminal's multi-column grid the loader takes the whole window */
+.term-root > .ml-root { grid-column: 1 / -1; grid-row: 1 / -1; justify-self: center; align-self: center; width: min(26rem, 100%); }

@@ -1,17 +1,6 @@
-export const CASH_COLOR = "#9aa4b2";
+export const CASH_COLOR = "#9a9a9a";
 
-const HOLDING_COLORS = [
-  "#3dd68c",
-  "#6ea8ff",
-  "#f5c542",
-  "#c084fc",
-  "#fb7185",
-  "#2ee6de",
-  "#f97316",
-  "#a3e635",
-  "#38bdf8",
-  "#e879f9",
-];
+const HOLDING_COLORS = ["#111111", "#3a3a3a", "#5c5c5c", "#7a7a7a", "#999999", "#b3b3b3", "#c8c8c8", "#d9d9d9", "#2a2a2a", "#8a8a8a"];
 
 export function holdingColor(symbol: string, taken: string[] = []) {
   let h = 2166136261;

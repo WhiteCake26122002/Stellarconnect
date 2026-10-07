@@ -29,20 +29,23 @@ type Props = {
   selectedId: string | null;
   replayCutoff?: number;
   showPnl: boolean;
+  /** Height of the HTML header (name, price, OHLC) laid over the top of the chart; the plot starts below it. */
+  topInset?: number;
   last: number;
   status?: "ready" | "loading";
   compare?: { symbol: string; candles: Candle[] } | null;
   onSelect: (id: string | null, kind: "drawing" | "position" | "indicator" | null) => void;
   onDrawings: (next: Drawing[] | ((d: Drawing[]) => Drawing[])) => void;
-  onDragLevel: (posId: string, field: "sl" | "tp", price: number) => void;
   onContext: (ev: { x: number; y: number; price: number; i: number }) => void;
-  onHover: (info: { o: number; h: number; l: number; c: number; v: number; t: number } | null) => void;
+  onHover: (info: { o: number; h: number; l: number; c: number; v: number; t: number; i: number } | null) => void;
   onReady?: (api: ChartHandle) => void;
 };
 
 export type ChartHandle = {
   reset: () => void;
   autoScale: () => void;
+  /** Zoom to the most recent `ms` of the series (at least a screenful of bars); null shows everything loaded. */
+  showRange: (ms: number | null) => void;
   screenshot: () => void;
 };
 
@@ -52,11 +55,26 @@ const GRID = "rgba(17,17,17,0.07)";
 const TEXT = "#6a6a6a";
 const FG = "#111111";
 const DEFAULT_BARS = 140;
+/** Heights for the placeholder shown while a series loads: a fixed shape, so it never jumps. */
+const SKELETON_BARS = [34, 40, 37, 46, 52, 48, 56, 61, 55, 63, 70, 66, 58, 62, 69, 75, 71, 64, 68, 74, 80, 77, 70, 73, 79, 84, 78, 82];
 const RIGHT_PAD_RATIO = 0.38;
 const MIN_RIGHT_PAD = 28;
 
+const themeCache = new WeakMap<Element, { key: string; value: ReturnType<typeof readThemeNow> }>();
+
+/** The chart's colours, read from CSS once per theme (the root's classes) rather than once per frame. */
 function readChartTheme(node: HTMLElement | null) {
   const host = node?.closest(".term-root") ?? node;
+  if (!host) return readThemeNow(null);
+  const key = `${host.className}|${document.documentElement.dataset.theme ?? ""}`;
+  const hit = themeCache.get(host);
+  if (hit && hit.key === key) return hit.value;
+  const value = readThemeNow(host);
+  themeCache.set(host, { key, value });
+  return value;
+}
+
+function readThemeNow(host: Element | null) {
   const s = host ? getComputedStyle(host) : null;
   const v = (name: string, fallback: string) => {
     const x = s?.getPropertyValue(name).trim();
@@ -67,7 +85,7 @@ function readChartTheme(node: HTMLElement | null) {
     grid: v("--chart-grid", GRID),
     text: v("--chart-text", TEXT),
     fg: v("--chart-fg", FG),
-    ink: v("--chart-ink", "#041210"),
+    ink: v("--chart-ink", "#111111"),
     tip: v("--chart-tip", "#111111"),
     tipFg: v("--chart-tip-fg", "#ffffff"),
     hair: v("--chart-hair", "rgba(17,17,17,0.2)"),
@@ -133,7 +151,6 @@ export function ChartCanvas(props: Props) {
       priceMin: number;
       priceMax: number;
       id?: string;
-      field?: "sl" | "tp";
     },
     draft: [] as { i: number; price: number }[],
     followRight: true,
@@ -145,6 +162,59 @@ export function ChartCanvas(props: Props) {
     layout: { plot: { x: 8, y: 8, w: 100, h: 100 }, volH: 56, right: 72, bottom: 22, h: 100 },
   });
   const viewKeyRef = useRef(props.viewKey);
+
+  // Work that depends only on the data is done once per data change, not once per frame.
+  const memo = useRef({
+    raw: null as null | { src: Candle[]; cutoff: number | undefined; out: Candle[] },
+    shaped: null as null | { raw: Candle[]; type: ChartType; out: Candle[] },
+    indicators: new WeakMap<Candle[], Map<string, ReturnType<typeof computeIndicator>>>(),
+  });
+  function rawCandles(src: Candle[], cutoff: number | undefined) {
+    const m = memo.current.raw;
+    if (m && m.src === src && m.cutoff === cutoff) return m.out;
+    const out = cutoff != null ? src.slice(0, cutoff + 1) : src;
+    memo.current.raw = { src, cutoff, out };
+    return out;
+  }
+  function shapedCandles(raw: Candle[], type: ChartType) {
+    const m = memo.current.shaped;
+    if (m && m.raw === raw && m.type === type) return m.out;
+    const out = transformCandles(raw, type);
+    memo.current.shaped = { raw, type, out };
+    return out;
+  }
+  function cachedIndicator(ind: IndicatorInstance, raw: Candle[]) {
+    let byKey = memo.current.indicators.get(raw);
+    if (!byKey) {
+      byKey = new Map();
+      memo.current.indicators.set(raw, byKey);
+    }
+    const key = `${ind.id}|${ind.kind}|${JSON.stringify(ind.inputs)}`;
+    let v = byKey.get(key);
+    if (!v) {
+      v = computeIndicator(ind, raw);
+      byKey.set(key, v);
+    }
+    return v;
+  }
+
+  // Pointer moves arrive faster than the screen refreshes; draw at most once per frame.
+  const frame = useRef(0);
+  function draw() {
+    if (frame.current) return;
+    frame.current = requestAnimationFrame(() => {
+      frame.current = 0;
+      drawNow();
+    });
+  }
+  useEffect(
+    () => () => {
+      // Strict Mode runs this cleanup once on mount; forgetting the cancelled id would make every later draw a no-op.
+      cancelAnimationFrame(frame.current);
+      frame.current = 0;
+    },
+    [],
+  );
 
   useEffect(() => {
     const api: ChartHandle = {
@@ -159,6 +229,25 @@ export function ChartCanvas(props: Props) {
         draw();
       },
       autoScale: () => {
+        state.current.autoPrice = true;
+        draw();
+      },
+      showRange: (ms) => {
+        const data = propsRef.current.candles;
+        const n = data.length;
+        if (!n) return;
+        const pad = rightPadFor();
+        const lastT = data[n - 1].t;
+        let first = 0;
+        if (ms != null) {
+          first = data.findIndex((c) => c.t >= lastT - ms);
+          if (first < 0) first = 0;
+          first = Math.min(first, Math.max(0, n - 20));
+        }
+        state.current.rightPad = pad;
+        state.current.end = n + pad;
+        state.current.start = first;
+        state.current.followRight = true;
         state.current.autoPrice = true;
         draw();
       },
@@ -201,7 +290,7 @@ export function ChartCanvas(props: Props) {
     }
     draw();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [props.candles, props.viewKey, props.indicators, props.drawings, props.positions, props.chartType, props.scaleMode, props.selectedId, props.tool, props.replayCutoff, props.showPnl, props.status]);
+  }, [props.candles, props.viewKey, props.indicators, props.drawings, props.positions, props.chartType, props.scaleMode, props.selectedId, props.tool, props.replayCutoff, props.showPnl, props.status, props.topInset]);
 
   useEffect(() => {
     const el = wrap.current;
@@ -248,6 +337,7 @@ export function ChartCanvas(props: Props) {
   }, []);
 
   function layout() {
+    const props = propsRef.current;
     const el = wrap.current;
     const cv = canvas.current;
     if (!el || !cv) return null;
@@ -269,7 +359,7 @@ export function ChartCanvas(props: Props) {
     const volH = volOn ? 58 : 0;
     const right = 64;
     const bottom = 22;
-    const top = 6;
+    const top = 6 + Math.max(0, Math.round(props.topInset ?? 0));
     const priceH = Math.max(80, h - top - bottom - volH - oscH);
     const plot = { x: 6, y: top, w: Math.max(40, w - right - 6), h: priceH };
     state.current.layout = { plot, volH, right, bottom, h };
@@ -292,24 +382,26 @@ export function ChartCanvas(props: Props) {
     return plot.y + ((max - price) / (max - min || 1)) * plot.h;
   }
 
-  function draw() {
+  function drawNow() {
+    const props = propsRef.current;
     const L = layout();
     if (!L) return;
     const { ctx, w, h, plot, volH, osc, right } = L;
     const theme = readChartTheme(wrap.current);
     const GRID = theme.grid;
     const TEXT = theme.text;
-    const FG = theme.fg;
     ctx.clearRect(0, 0, w, h);
     ctx.fillStyle = theme.bg;
     ctx.fillRect(0, 0, w, h);
 
-    const raw = props.replayCutoff != null ? props.candles.slice(0, props.replayCutoff + 1) : props.candles;
-    const data = transformCandles(raw, props.chartType);
+    const raw = rawCandles(props.candles, props.replayCutoff);
+    const data = shapedCandles(raw, props.chartType);
     if (!data.length) {
-      ctx.fillStyle = TEXT;
-      ctx.font = "12px IBM Plex Sans, sans-serif";
-      ctx.fillText(props.status === "loading" ? "Loading market data…" : "Unable to load market data.", 24, 40);
+      if (props.status !== "loading") {
+        ctx.fillStyle = TEXT;
+        ctx.font = "12px IBM Plex Sans, sans-serif";
+        ctx.fillText("Unable to load market data.", 24, 40);
+      }
       return;
     }
     const n = data.length;
@@ -340,7 +432,7 @@ export function ChartCanvas(props: Props) {
     }
     for (const ind of props.indicators) {
       if (!ind.visible || ind.pane !== "price") continue;
-      const s = computeIndicator(ind, raw);
+      const s = cachedIndicator(ind, raw);
       for (const arr of Object.values(s)) {
         for (let i = start; i < Math.min(end, n); i++) {
           const v = arr[i];
@@ -353,8 +445,8 @@ export function ChartCanvas(props: Props) {
     }
     for (const p of props.positions) {
       if (p.status === "closed") continue;
-      min = Math.min(min, p.avgPrice, p.sl ?? p.avgPrice, p.tp ?? p.avgPrice);
-      max = Math.max(max, p.avgPrice, p.sl ?? p.avgPrice, p.tp ?? p.avgPrice);
+      min = Math.min(min, p.avgPrice);
+      max = Math.max(max, p.avgPrice);
     }
     const yPad = (max - min) * 0.08 || max * 0.01;
     min -= yPad;
@@ -388,7 +480,7 @@ export function ChartCanvas(props: Props) {
         if (vi === 0) ctx.moveTo(x, y);
         else ctx.lineTo(x, y);
       });
-      ctx.strokeStyle = "#6ea8ff";
+      ctx.strokeStyle = "#8a8a8a";
       ctx.lineWidth = 1.4;
       ctx.stroke();
       if (props.chartType !== "line" && vis.length) {
@@ -396,7 +488,7 @@ export function ChartCanvas(props: Props) {
         ctx.lineTo(plot.x + plot.w, baseY);
         ctx.lineTo(plot.x, baseY);
         ctx.closePath();
-        ctx.fillStyle = "rgba(110,168,255,0.12)";
+        ctx.fillStyle = "rgba(138,138,138,0.12)";
         ctx.fill();
       }
     } else {
@@ -435,7 +527,7 @@ export function ChartCanvas(props: Props) {
     if (cmp?.candles?.length && vis.length) {
       const baseMain = vis[0].c || 1;
       const byT = cmp.candles;
-      ctx.strokeStyle = "#c084fc";
+      ctx.strokeStyle = "#c0c0c0";
       ctx.lineWidth = 1.25;
       ctx.globalAlpha = 0.9;
       ctx.beginPath();
@@ -456,13 +548,13 @@ export function ChartCanvas(props: Props) {
       ctx.stroke();
       ctx.globalAlpha = 1;
       ctx.font = "600 10px IBM Plex Sans, sans-serif";
-      ctx.fillStyle = "#c084fc";
+      ctx.fillStyle = "#c0c0c0";
       ctx.fillText(cmp.symbol, plot.x + plot.w - 64, plot.y + 14);
     }
 
     for (const ind of props.indicators) {
       if (!ind.visible || ind.pane !== "price") continue;
-      const series = computeIndicator(ind, raw);
+      const series = cachedIndicator(ind, raw);
       ctx.globalAlpha = ind.style.opacity;
       ctx.strokeStyle = ind.style.color;
       ctx.lineWidth = ind.style.width;
@@ -500,7 +592,7 @@ export function ChartCanvas(props: Props) {
         id: "draft",
         kind: props.tool as DrawingKind,
         points: state.current.draft,
-        color: "#6ea8ff",
+        color: "#8a8a8a",
         width: 1.2,
         opacity: 1,
         dash: "solid",
@@ -517,14 +609,10 @@ export function ChartCanvas(props: Props) {
       if (p.status === "closed") continue;
       const last = props.last || vis[vis.length - 1]?.c || data[n - 1].c;
       const pnl = (last - p.avgPrice) * p.qty * (p.side === "long" ? 1 : -1);
-      lineLabel(ctx, plot, py(p.avgPrice), p.side === "long" ? UP : DOWN, `${p.side === "long" ? "BUY" : "SELL"} ${p.qty} @ ${p.avgPrice.toFixed(2)}`);
-      if (p.sl != null) lineLabel(ctx, plot, py(p.sl), DOWN, `SL ${p.sl.toFixed(2)}`);
-      if (p.tp != null) lineLabel(ctx, plot, py(p.tp), UP, `TP ${p.tp.toFixed(2)}`);
-      if (props.showPnl) {
-        ctx.font = "600 11px IBM Plex Sans, sans-serif";
-        ctx.fillStyle = pnl >= 0 ? UP : DOWN;
-        ctx.fillText(`${p.symbol} ${p.side.toUpperCase()} ${p.qty}  ${pnl >= 0 ? "+" : "−"}₹${Math.abs(pnl).toLocaleString("en-IN", { maximumFractionDigits: 0 })}`, plot.x + 10, plot.y + 18);
-      }
+      // The P&L rides on the entry line's own label. Drawing it at the plot's top-left put it under the
+      // HTML header (name, price, OHLC), where the two texts overlapped.
+      const pnlText = props.showPnl ? `  ${pnl >= 0 ? "+" : "−"}₹${Math.abs(pnl).toLocaleString("en-IN", { maximumFractionDigits: 0 })}` : "";
+      lineLabel(ctx, plot, py(p.avgPrice), p.side === "long" ? UP : DOWN, `${p.side === "long" ? "BUY" : "SELL"} ${p.qty} @ ${p.avgPrice.toFixed(2)}${pnlText}`);
     }
 
     for (const t of props.trades.slice(0, 40)) {
@@ -560,7 +648,7 @@ export function ChartCanvas(props: Props) {
     ctx.setLineDash([]);
     ctx.fillStyle = last.c >= last.o ? UP : DOWN;
     ctx.fillRect(plot.x + plot.w, ly - 8, right - 4, 16);
-    ctx.fillStyle = "#041210";
+    ctx.fillStyle = "#111111";
     ctx.font = "600 10px IBM Plex Sans, sans-serif";
     ctx.fillText(last.c.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 }), plot.x + plot.w + 4, ly + 3);
 
@@ -594,7 +682,7 @@ export function ChartCanvas(props: Props) {
       ctx.fillRect(plot.x, oy, plot.w, 74);
       ctx.fillStyle = TEXT;
       ctx.fillText(ind.label, plot.x + 6, oy + 12);
-      const series = computeIndicator(ind, raw);
+      const series = cachedIndicator(ind, raw);
       let omin = Infinity;
       let omax = -Infinity;
       for (const arr of Object.values(series)) {
@@ -670,9 +758,9 @@ export function ChartCanvas(props: Props) {
       lastVals.forEach((row, vi) => {
         const y = Math.min(oy + 70, Math.max(oy + 16, op(row.value)));
         const label = row.value.toFixed(2);
-        ctx.fillStyle = vi === 0 ? ind.style.color : "#8b93a3";
+        ctx.fillStyle = vi === 0 ? ind.style.color : "#979797";
         ctx.fillRect(plot.x + plot.w, y - 8, right - 4, 15);
-        ctx.fillStyle = "#041210";
+        ctx.fillStyle = "#111111";
         ctx.font = "600 10px IBM Plex Sans, sans-serif";
         ctx.fillText(label, plot.x + plot.w + 4, y + 3);
       });
@@ -705,7 +793,7 @@ export function ChartCanvas(props: Props) {
         ctx.setLineDash([]);
         ctx.fillStyle = upLast ? UP : DOWN;
         ctx.fillRect(plot.x + plot.w, ly - 8, right - 4, 16);
-        ctx.fillStyle = "#041210";
+        ctx.fillStyle = "#111111";
         ctx.font = "600 10px IBM Plex Sans, sans-serif";
         ctx.fillText(
           props.quote.last.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
@@ -817,21 +905,6 @@ export function ChartCanvas(props: Props) {
       return;
     }
     if (tool === "cursor" || tool === "crosshair") {
-      const posHit = hitPosition(w.price);
-      if (posHit) {
-        state.current.drag = {
-          mode: "level",
-          x: w.x,
-          y: w.y,
-          start: state.current.start,
-          end: state.current.end,
-          priceMin: state.current.priceMin,
-          priceMax: state.current.priceMax,
-          id: posHit.id,
-          field: posHit.field,
-        };
-        return;
-      }
       const dhit = hitDrawing(w.i, w.price);
       if (dhit) {
         props.onSelect(dhit, "drawing");
@@ -893,7 +966,7 @@ export function ChartCanvas(props: Props) {
       } else {
         const i = Math.min(data.length - 1, Math.max(0, Math.floor(w.i)));
         const c = data[i];
-        if (c) props.onHover({ o: c.o, h: c.h, l: c.l, c: c.c, v: c.v, t: c.t });
+        if (c) props.onHover({ o: c.o, h: c.h, l: c.l, c: c.c, v: c.v, t: c.t, i });
       }
     }
     const drag = state.current.drag;
@@ -930,8 +1003,6 @@ export function ChartCanvas(props: Props) {
       state.current.end = Math.min(n + pad, drag.end);
       state.current.start = Math.max(0, state.current.end - next);
       state.current.followRight = state.current.end >= n + pad - 1;
-    } else if (drag.mode === "level" && drag.id && drag.field) {
-      props.onDragLevel(drag.id, drag.field, w.price);
     } else if (drag.mode === "brush") {
       state.current.draft = [...state.current.draft, { i: w.i, price: w.price }];
     } else if (drag.mode === "move-draw" && drag.id) {
@@ -1001,7 +1072,7 @@ export function ChartCanvas(props: Props) {
       id: nid(),
       kind,
       points,
-      color: kind.includes("fib") ? "#c084fc" : "#6ea8ff",
+      color: kind.includes("fib") ? "#c0c0c0" : "#8a8a8a",
       width: 1.2,
       opacity: 1,
       dash: "solid",
@@ -1028,16 +1099,6 @@ export function ChartCanvas(props: Props) {
     return null;
   }
 
-  function hitPosition(price: number): { id: string; field: "sl" | "tp" } | null {
-    const tolP = (state.current.priceMax - state.current.priceMin) * 0.01;
-    for (const p of props.positions) {
-      if (p.status === "closed") continue;
-      if (p.sl != null && Math.abs(p.sl - price) < tolP) return { id: p.id, field: "sl" };
-      if (p.tp != null && Math.abs(p.tp - price) < tolP) return { id: p.id, field: "tp" };
-    }
-    return null;
-  }
-
   return (
     <div ref={wrap} className="term-chart-wrap" data-view-key={props.viewKey} data-chart-ready={props.candles.length ? "true" : "false"} data-right-pad="0" data-future-bars="0">
       <canvas
@@ -1056,6 +1117,13 @@ export function ChartCanvas(props: Props) {
           draw();
         }}
       />
+      {props.candles.length === 0 && props.status === "loading" ? (
+        <div className="chart-skeleton" aria-hidden="true">
+          {SKELETON_BARS.map((h, i) => (
+            <span key={i} style={{ height: `${h}%`, animationDelay: `${(i % 9) * 70}ms` }} />
+          ))}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -1184,6 +1252,6 @@ function lineLabel(ctx: CanvasRenderingContext2D, plot: { x: number; w: number }
   const tw = ctx.measureText(text).width + 10;
   ctx.fillStyle = color;
   ctx.fillRect(plot.x + 8, y - 14, tw, 14);
-  ctx.fillStyle = "#041210";
+  ctx.fillStyle = "#111111";
   ctx.fillText(text, plot.x + 13, y - 4);
 }

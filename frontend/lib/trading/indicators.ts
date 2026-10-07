@@ -30,7 +30,7 @@ export const INDICATOR_CATALOG: {
   { kind: "fvg", name: "Fair Value Gap", category: "MARKET STRUCTURE", pane: "price", defaults: {}, info: "Three-candle imbalance gaps." },
 ];
 
-const COLORS = ["#6ea8ff", "#e8b84a", "#c084fc", "#3dd68c", "#f07178", "#67e8f9", "#fb923c"];
+const COLORS = ["#111111", "#555555", "#888888", "#333333", "#aaaaaa", "#6b6b6b", "#222222"];
 
 export function catalogEntry(kind: IndicatorKind) {
   return INDICATOR_CATALOG.find((x) => x.kind === kind)!;

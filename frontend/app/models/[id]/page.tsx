@@ -7,6 +7,7 @@ import { AppShell, WORKSPACE_TABS, type ShellSurface } from "@/components/AppShe
 import { Heatmap } from "@/components/charts";
 import { CompanyLogo } from "@/components/CompanyLogo";
 import { DriverDrawer } from "@/components/DriverDrawer";
+import { ModuleLoader, useLoaderHold } from "@/components/ModuleLoader";
 import { DataCheckNotice } from "@/components/guide/DataCheckNotice";
 import { Term } from "@/components/guide/Glossary";
 import { GuidedTour } from "@/components/guide/GuidedTour";
@@ -23,6 +24,7 @@ export default function ModelWorkspacePage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
   const [model, setModel] = useState<Workspace | null>(null);
+  const held = useLoaderHold(!!model);
   const [error, setError] = useState("");
   const [surface, setSurface] = useState<ShellSurface>("dashboard");
   const [busy, setBusy] = useState(false);
@@ -152,13 +154,11 @@ export default function ModelWorkspacePage() {
       </AppShell>
     );
   }
-  if (!model) {
+  if (!model || !held) {
     return (
       <AppShell>
         <main id="main" className="shell" aria-busy="true">
-          <div className="skel skel-line" style={{ width: "40%" }} />
-          <div className="skel skel-block" style={{ margin: "1rem 0" }} />
-          <p className="muted">Loading workspace…</p>
+          <ModuleLoader kind="dcf" />
         </main>
       </AppShell>
     );

@@ -6,12 +6,12 @@ export const GRID = "#ececec";
 export const BULL = "#1a7a45";
 export const BEAR = "#b4233c";
 
-export const FUND_PALETTE = ["#0b9e96", "#6d5ef5", "#c4476a", "#2f8f5b", "#b8860b", "#3b6fbf", "#c45b3a", "#1f8a78"];
+export const FUND_PALETTE = ["#111111", "#6b6b6b", "#a0a0a0", "#3a3a3a", "#8a8a8a", "#c4c4c4", "#555555", "#b0b0b0"];
 
-export const SUBJECT_COLOR = "#0b9e96";
+export const SUBJECT_COLOR = "#111111";
 export const BENCH_COLORS: Record<string, string> = {
-  "NIFTY 50": "#3b6fbf",
-  "NIFTY 500": "#b8860b",
+  "NIFTY 50": "#6b6b6b",
+  "NIFTY 500": "#a0a0a0",
 };
 export const benchColor = (label: string, index: number) => BENCH_COLORS[label] ?? FUND_PALETTE[(index + 5) % FUND_PALETTE.length];
 

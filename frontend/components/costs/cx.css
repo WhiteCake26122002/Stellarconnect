@@ -1,0 +1,239 @@
+/* Shared styles for the charge sheet, summaries, disclosure, confidence badge and tax profile.
+   Black, white and grey, like the desks they sit in. Green and red appear only on a gain or a loss.
+   Colours come from whichever desk the component is placed in (--term-* in the terminal, --mf-* in funds). */
+
+.cx-overlay, .cx-summary, .cx-disclosure, .cx-profile, .cx-conf, .cx-cards, .cx-block, .cx-table-wrap, .cx-ladder, .cx-tabs, .cx-pop {
+  --cx-ink: var(--term-text, var(--mf-ink, #111111));
+  --cx-muted: var(--term-muted, var(--mf-muted, #6a6a6a));
+  --cx-line: var(--term-line, var(--mf-line, #e6e6e6));
+  --cx-soft: var(--mf-soft, #f5f5f5);
+  --cx-panel: var(--term-panel, #ffffff);
+  --cx-up: var(--term-up, #1f9d62);
+  --cx-down: var(--term-down, #d4474f);
+  --cx-warn: var(--cx-ink);
+}
+
+.cx-up { color: var(--cx-up); }
+.cx-down { color: var(--cx-down); }
+.cx-num { font-variant-numeric: tabular-nums; }
+
+/* ---- Modal ----------------------------------------------------------------------------------- */
+.cx-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: rgba(10, 10, 10, 0.45);
+}
+.cx-modal {
+  width: min(26rem, 100%);
+  max-height: calc(100dvh - 32px);
+  display: flex;
+  flex-direction: column;
+  background: var(--cx-panel);
+  color: var(--cx-ink);
+  border: 1px solid var(--cx-line);
+  border-radius: 14px;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.25);
+  font-size: 0.8125rem;
+  line-height: 1.35;
+}
+.cx-modal.cx-wide { width: min(46rem, 100%); }
+.cx-modal-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 16px 18px 6px; }
+.cx-modal-head h2 { margin: 0; font-size: 1.05rem; font-weight: 650; letter-spacing: -0.01em; }
+.cx-sub { margin: 3px 0 0; color: var(--cx-muted); font-size: 0.75rem; }
+.cx-x {
+  width: 2rem; height: 2rem; display: grid; place-items: center; border: 0; border-radius: 8px;
+  background: transparent; color: var(--cx-muted); font-size: 1.4rem; line-height: 1; cursor: pointer;
+}
+.cx-x:hover { background: var(--cx-soft); color: var(--cx-ink); }
+.cx-x:focus-visible, .cx-seg button:focus-visible, .cx-link:focus-visible, .cx-info:focus-visible { outline: 2px solid var(--cx-ink); outline-offset: 2px; }
+.cx-body { padding: 8px 18px 4px; overflow: auto; min-height: 0; }
+.cx-foot { padding: 10px 18px 16px; border-top: 1px solid var(--cx-line); margin-top: 8px; color: var(--cx-muted); font-size: 0.72rem; }
+.cx-foot p { margin: 0 0 4px; }
+.cx-note { margin: 0; padding: 8px 0; color: var(--cx-muted); }
+.cx-quiet-text { margin: 4px 0 0; color: var(--cx-muted); font-size: 0.72rem; line-height: 1.4; }
+.cx-ok { color: var(--cx-ink); }
+
+.cx-seg { display: grid; grid-template-columns: 1fr 1fr; gap: 3px; padding: 3px; margin: 4px 0 12px; background: var(--cx-soft); border: 1px solid var(--cx-line); border-radius: 10px; }
+.cx-seg button { border: 0; border-radius: 8px; padding: 7px 0; background: transparent; color: var(--cx-muted); font: inherit; font-weight: 600; cursor: pointer; }
+.cx-seg button.on { background: var(--cx-panel); color: var(--cx-ink); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12); }
+
+.cx-h { margin: 14px 0 2px; font-size: 0.82rem; font-weight: 650; }
+
+/* ---- Rows ------------------------------------------------------------------------------------- */
+.cx-rows { margin: 0; padding: 0; }
+.cx-row { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--cx-line); }
+.cx-row dt { margin: 0; color: var(--cx-ink); }
+.cx-row dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.cx-row small { display: block; margin-top: 1px; color: var(--cx-muted); font-size: 0.68rem; font-weight: 400; }
+.cx-row .cx-tag { color: var(--cx-warn); }
+.cx-strong dt, .cx-strong dd { font-weight: 650; font-size: 0.9rem; }
+.cx-quiet dt { color: var(--cx-muted); }
+.cx-quiet dd { color: var(--cx-ink); }
+.cx-lead dt { font-weight: 600; }
+.cx-lead dd { font-weight: 650; }
+.cx-total { border-bottom: 0; border-top: 1px solid var(--cx-ink); }
+.cx-total dt, .cx-total dd { font-weight: 650; }
+.cx-compact .cx-row { padding: 4px 0; font-size: 0.75rem; }
+
+/* ---- Summary (in the ticket) ----------------------------------------------------------------- */
+.cx-summary { display: grid; gap: 4px; padding: 8px 0 0; border-top: 1px solid var(--cx-line); }
+.cx-summary details { border: 1px solid var(--cx-line); border-radius: 8px; padding: 6px 10px; }
+.cx-summary summary { display: flex; justify-content: space-between; gap: 8px; cursor: pointer; list-style: none; font-weight: 600; }
+.cx-summary summary::-webkit-details-marker { display: none; }
+.cx-summary summary::after { content: "▾"; margin-left: 6px; color: var(--cx-muted); }
+.cx-summary summary span { flex: 1; }
+.cx-summary summary b { font-variant-numeric: tabular-nums; }
+.cx-summary details[open] summary::after { content: "▴"; }
+.cx-after { padding: 6px 0 0; border-bottom: 0; }
+.cx-link { display: inline-block; margin-top: 6px; padding: 0; border: 0; background: none; color: var(--cx-ink); font: inherit; font-size: 0.72rem; text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
+
+/* ---- Disclosure ------------------------------------------------------------------------------ */
+.cx-disclosure { display: grid; gap: 8px; margin: 12px 0; color: var(--cx-ink); font-size: 0.8rem; line-height: 1.45; }
+.cx-important { border: 1px solid var(--cx-line); border-left: 3px solid var(--cx-ink); border-radius: 8px; padding: 10px 12px; background: var(--cx-soft); }
+.cx-important strong { display: block; margin-bottom: 2px; }
+.cx-important p { margin: 2px 0; }
+.cx-disclosure details { border: 1px solid var(--cx-line); border-radius: 8px; padding: 8px 12px; }
+.cx-disclosure summary { cursor: pointer; font-weight: 600; }
+.cx-explain { display: grid; gap: 10px; margin-top: 8px; }
+.cx-explain h4 { margin: 0 0 2px; font-size: 0.78rem; }
+.cx-explain p { margin: 2px 0; color: var(--cx-muted); }
+.cx-explain ul { margin: 2px 0 0; padding-left: 1.1rem; color: var(--cx-muted); }
+.cx-explain a { color: var(--cx-ink); }
+
+/* ---- Info tip --------------------------------------------------------------------------------- */
+.cx-tip { position: relative; display: inline-flex; vertical-align: middle; margin-left: 4px; }
+.cx-info {
+  width: 1.05rem; height: 1.05rem; display: grid; place-items: center; padding: 0;
+  border: 1px solid var(--cx-muted); border-radius: 50%; background: transparent; color: var(--cx-muted);
+  font: italic 650 0.65rem/1 Georgia, serif; cursor: pointer;
+}
+.cx-info:hover, .cx-info[aria-expanded="true"] { background: var(--cx-ink); color: var(--cx-panel); border-color: var(--cx-ink); }
+.cx-pop {
+  position: absolute; z-index: 30; left: 50%; top: calc(100% + 6px); transform: translateX(-50%);
+  width: min(17rem, 70vw); padding: 8px 10px; border: 1px solid var(--cx-line); border-radius: 8px;
+  background: var(--cx-panel); color: var(--cx-ink); box-shadow: 0 10px 26px rgba(0, 0, 0, 0.18);
+  font-size: 0.72rem; font-weight: 400; line-height: 1.4; text-align: left; text-transform: none; letter-spacing: 0; white-space: normal;
+}
+
+/* ---- Confidence ------------------------------------------------------------------------------ */
+.cx-conf { display: grid; gap: 4px; }
+.cx-conf p { margin: 0; color: var(--cx-muted); font-size: 0.72rem; }
+.cx-conf ul { margin: 0; padding-left: 1.05rem; color: var(--cx-muted); font-size: 0.72rem; }
+.cx-conf-pill { justify-self: start; padding: 2px 9px; border: 1px solid var(--cx-ink); border-radius: 999px; font-size: 0.68rem; font-weight: 650; letter-spacing: 0.03em; text-transform: uppercase; }
+.cx-conf-high .cx-conf-pill { background: var(--cx-ink); color: var(--cx-panel); }
+.cx-conf-estimated .cx-conf-pill { background: transparent; color: var(--cx-ink); }
+.cx-conf-incomplete .cx-conf-pill { background: transparent; color: var(--cx-warn); border-color: var(--cx-warn); border-style: dashed; }
+
+/* ---- Tax profile ----------------------------------------------------------------------------- */
+.cx-profile { margin: 8px 0; padding: 10px 12px; border: 1px solid var(--cx-line); border-radius: 10px; color: var(--cx-ink); }
+.cx-profile legend { padding: 0 6px; font-weight: 650; }
+.cx-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr)); gap: 10px; margin-top: 6px; }
+.cx-fields label { display: grid; gap: 3px; font-size: 0.75rem; }
+.cx-fields label span { font-weight: 600; }
+.cx-fields select, .cx-fields input {
+  min-width: 0; padding: 6px 8px; border: 1px solid var(--cx-line); border-radius: 8px; background: var(--cx-panel); color: var(--cx-ink); font: inherit;
+}
+.cx-fields small { color: var(--cx-muted); font-size: 0.68rem; }
+
+/* ---- Cards, tables, ladder ------------------------------------------------------------------- */
+.cx-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(9.5rem, 1fr)); gap: 8px; margin: 10px 0; }
+.cx-card { border: 1px solid var(--cx-line); border-radius: 10px; padding: 10px 12px; background: var(--cx-panel); color: var(--cx-ink); }
+.cx-card h3, .cx-card .cx-k { margin: 0 0 4px; color: var(--cx-muted); font-size: 0.68rem; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; }
+.cx-card .cx-v { font-size: 1.15rem; font-weight: 650; font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
+.cx-card p { margin: 3px 0 0; color: var(--cx-muted); font-size: 0.7rem; line-height: 1.35; }
+.cx-block { display: grid; gap: 6px; margin: 14px 0; color: var(--cx-ink); }
+.cx-block > h2, .cx-block > h3 { margin: 0; color: var(--cx-ink); font-size: 0.95rem; font-weight: 650; letter-spacing: -0.01em; }
+.cx-block details { border: 1px solid var(--cx-line); border-radius: 8px; padding: 6px 10px; }
+.cx-block summary { cursor: pointer; font-weight: 600; }
+
+.cx-table-wrap { overflow-x: auto; border: 1px solid var(--cx-line); border-radius: 10px; }
+.cx-table { width: 100%; border-collapse: collapse; font-size: 0.75rem; font-variant-numeric: tabular-nums; color: var(--cx-ink); }
+.cx-table th, .cx-table td { padding: 7px 10px; border-bottom: 1px solid var(--cx-line); text-align: right; white-space: nowrap; }
+.cx-table th:first-child, .cx-table td:first-child { text-align: left; }
+.cx-table th { color: var(--cx-muted); font-size: 0.66rem; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; background: var(--cx-soft); }
+.cx-table tbody tr:last-child td { border-bottom: 0; }
+.cx-table tr.cx-click { cursor: pointer; }
+.cx-table tr.cx-click:hover td { background: var(--cx-soft); }
+.cx-table td .cx-rowbtn { padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: inherit; cursor: pointer; text-decoration: underline; text-decoration-color: var(--cx-line); text-underline-offset: 3px; }
+.cx-table td .cx-rowbtn:focus-visible { outline: 2px solid var(--cx-ink); outline-offset: 2px; }
+
+.cx-ladder { display: grid; gap: 0; border: 1px solid var(--cx-line); border-radius: 10px; padding: 4px 14px; color: var(--cx-ink); background: var(--cx-panel); }
+.cx-ladder .cx-row:last-child { border-bottom: 0; }
+
+.cx-tabs { display: flex; flex-wrap: wrap; gap: 4px; margin: 6px 0; }
+.cx-tabs button { padding: 5px 12px; border: 1px solid var(--cx-line); border-radius: 999px; background: transparent; color: var(--cx-muted); font: inherit; font-size: 0.75rem; font-weight: 600; cursor: pointer; }
+.cx-tabs button[aria-pressed="true"], .cx-tabs button[aria-selected="true"] { background: var(--cx-ink); border-color: var(--cx-ink); color: var(--cx-panel); }
+.cx-tabs button:focus-visible { outline: 2px solid var(--cx-ink); outline-offset: 2px; }
+
+.cx-empty { padding: 14px; border: 1px dashed var(--cx-line); border-radius: 10px; color: var(--cx-muted); text-align: center; font-size: 0.78rem; }
+.cx-warn-note { margin: 4px 0; padding: 8px 10px; border: 1px solid var(--cx-line); border-left: 3px solid var(--cx-warn); border-radius: 6px; font-size: 0.75rem; }
+
+@media (max-width: 560px) {
+  .cx-modal { border-radius: 12px; }
+  .cx-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+/* ---- Order ticket product toggle -------------------------------------------------------------- */
+.cx-product { display: grid; gap: 4px; }
+.cx-product > span { color: var(--term-muted, #6a6a6a); font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; }
+.cx-product > div { display: grid; grid-template-columns: 1fr 1fr; gap: 3px; padding: 3px; border: 1px solid var(--term-line, #e6e6e6); border-radius: 8px; }
+.cx-product button { padding: 6px 0; border: 0; border-radius: 6px; background: transparent; color: var(--term-muted, #6a6a6a); font: inherit; font-weight: 600; cursor: pointer; }
+.cx-product button.on { background: var(--term-text, #111); color: var(--term-panel, #fff); }
+.cx-product button:focus-visible { outline: 2px solid var(--term-text, #111); outline-offset: 2px; }
+
+/* ---- Gain lists -------------------------------------------------------------------------------- */
+.cx-glist { margin: 6px 0 0; padding: 0; list-style: none; display: grid; gap: 6px; }
+.cx-glist li { display: grid; gap: 4px; padding: 8px 10px; border: 1px solid var(--cx-line); border-radius: 8px; color: var(--cx-ink); }
+.cx-glist dl { display: grid; grid-template-columns: repeat(auto-fit, minmax(8rem, 1fr)); gap: 4px 12px; margin: 0; }
+.cx-glist dt { color: var(--cx-muted); font-size: 0.66rem; letter-spacing: 0.04em; text-transform: uppercase; }
+.cx-glist dd { margin: 0; font-variant-numeric: tabular-nums; }
+.cx-glist.plain li { border: 0; padding: 2px 0; color: var(--cx-muted); font-size: 0.75rem; }
+.cx-glist .cx-rowbtn { justify-self: start; padding: 0; border: 0; background: none; color: inherit; font: inherit; font-weight: 600; cursor: pointer; text-decoration: underline; text-decoration-color: var(--cx-line); text-underline-offset: 3px; }
+.cx-glist .cx-rowbtn:focus-visible { outline: 2px solid var(--cx-ink); outline-offset: 2px; }
+
+.cg-page { display: grid; gap: 4px; align-content: start; padding-bottom: 24px; }
+.cg-page .board-head { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 8px; }
+.cx-pnl-toggle { display: inline-flex; gap: 3px; padding: 3px; border: 1px solid var(--term-line, #e6e6e6); border-radius: 999px; }
+.cx-pnl-toggle button { padding: 3px 11px; border: 0; border-radius: 999px; background: transparent; color: var(--term-muted, #6a6a6a); font: inherit; font-size: 11px; font-weight: 600; cursor: pointer; }
+.cx-pnl-toggle button[aria-pressed="true"] { background: var(--term-text, #111); color: var(--term-panel, #fff); }
+.cx-pnl-toggle button:focus-visible { outline: 2px solid var(--term-text, #111); outline-offset: 2px; }
+
+/* The terminal's order summary lays its own definition lists out in two columns; the charge rows are not that. */
+.confirm-box dl.cx-rows { display: block; gap: 0; grid-template-columns: none; }
+.confirm-box .cx-row dt { color: var(--cx-ink); }
+.confirm-box .cx-row.cx-quiet dt { color: var(--cx-muted); }
+.confirm-box .cx-summary { margin-top: 4px; }
+.cx-row .cx-tag { color: var(--cx-muted); font-style: italic; }
+
+/* The terminal resets every button; the pills and toggles below need their padding back. */
+.term-root .cx-pnl-toggle button, .term-root .cx-tabs button, .term-root .cx-product button, .term-root .cx-seg button {
+  height: auto; min-height: 0; line-height: 1.25; white-space: nowrap;
+}
+.term-root .cx-pnl-toggle button { padding: 4px 12px; }
+.term-root .cx-tabs button { padding: 5px 12px; border: 1px solid var(--cx-line); }
+.term-root .cx-tabs button[aria-pressed="true"] { border-color: var(--cx-ink); }
+.term-root .cx-seg button { padding: 7px 0; }
+.cg-page .cx-tabs, .port-page .cx-pnl-toggle { flex-wrap: wrap; justify-content: flex-end; }
+
+/* ---- Fund cards ------------------------------------------------------------------------------- */
+.cx-fundgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 24rem), 1fr)); gap: 10px; align-items: start; }
+.cx-fundtax { display: grid; gap: 4px; }
+.cx-fundtax-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.cx-fundtax-head strong, .cx-fundtax-head .cx-rowbtn { font-size: 0.9rem; font-weight: 650; }
+.cx-fundtax-head p { margin: 2px 0 0; color: var(--cx-muted); font-size: 0.72rem; }
+.cx-fundtax .cx-h { margin: 8px 0 0; }
+.cx-fundtax details { margin-top: 6px; }
+.cx-fundtax summary { cursor: pointer; font-size: 0.75rem; font-weight: 600; }
+.cx-card .cx-rowbtn { padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; text-decoration: underline; text-decoration-color: var(--cx-line); text-underline-offset: 3px; }
+.cx-inline { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
+.mf .cx-block, .mf .cx-cards { color: var(--mf-ink, #111); }
+.mf .cx-tabs { margin: 8px 0; }
+
+/* A grid track sizes to its content, which let a wide sheet outgrow a phone: pin the track to the overlay. */
+.cx-overlay { grid-template-columns: minmax(0, 1fr); }
+.cx-modal { max-width: 100%; min-width: 0; }
+.cx-table-wrap { max-width: 100%; }

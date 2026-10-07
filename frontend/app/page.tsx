@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { HomeGate } from "@/components/home/HomeGate";
 import "./home.css";
+import "./cinema.css";
 
 export const metadata: Metadata = {
   title: "Connect · Three desks, one account",

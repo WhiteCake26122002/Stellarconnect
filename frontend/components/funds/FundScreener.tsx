@@ -6,9 +6,11 @@ import { CompanyLogo } from "@/components/CompanyLogo";
 import type { FundAnalysis, FundHolding, FundPortfolio } from "@/lib/api";
 import { assetClass, assetKind, categoryRisk, categoryShort, planType, RiskLevel } from "@/lib/funds/category";
 import { rupees, signedPoints, tone } from "@/lib/funds/format";
+import { benchView, FundRow, pts, returnView, VERDICT_LABEL, verdictTone } from "@/lib/funds/returns";
 import { isWatched, setFundView, useFundView, useWatchlist } from "@/lib/funds/local";
 import { MAX_COMPARE } from "./CompareTray";
 import { FundCard } from "./FundCard";
+import { HoldingRows } from "./HoldingRows";
 import { CategoryChip, EmptyState, GapNote, RiskBadge } from "./FundAtoms";
 import { CategoryIcon, GridIcon, RowsIcon } from "./FundIcons";
 import { SimilarFunds } from "./SimilarFunds";
@@ -26,7 +28,7 @@ const RISK_FILTERS: { id: RiskFilter; label: string; test: (r: RiskLevel | null)
   { id: "high", label: "Very high", test: (r) => r === 6 },
 ];
 
-type Row = {
+export type Row = {
   h: FundHolding;
   color: string;
   weight: number;
@@ -34,8 +36,13 @@ type Row = {
   asset: string;
   category: string;
   plan: "Direct" | "Regular";
-  xirr: number | null;
+  perf: FundRow | undefined;
+  /** The return to show: annualized only when the server says a year of money allows it. */
+  ret: number | null;
+  retShort: string;
+  /** Fund minus its own benchmark, in percentage points, over identical dates. */
   alpha: number | null;
+  benchLabel: string | null;
 };
 
 const PRESETS: { id: Preset; label: string; hint: string; test: (r: Row, median1y: number | null) => boolean }[] = [
@@ -46,8 +53,8 @@ const PRESETS: { id: Preset; label: string; hint: string; test: (r: Row, median1
     hint: "Risk low to moderate, and a 1Y return in the top half of your funds",
     test: (r, m) => r.risk != null && r.risk <= 3 && r.h.return_1y != null && m != null && r.h.return_1y >= m,
   },
-  { id: "beating", label: "Beating Nifty 500", hint: "Your XIRR is ahead of the Nifty 500 over the same dates", test: (r) => r.alpha != null && r.alpha > 0 },
-  { id: "lagging", label: "Lagging", hint: "Behind the Nifty 500 over your dates, or down over one year", test: (r) => (r.alpha != null && r.alpha < 0) || (r.h.return_1y != null && r.h.return_1y < 0) },
+  { id: "beating", label: "Ahead of benchmark", hint: "Ahead of its own benchmark over the same dates, once there are at least 30 days of holding", test: (r) => r.perf?.verdict === "outperformed" },
+  { id: "lagging", label: "Behind benchmark", hint: "Behind its own benchmark over the same dates (30+ days), or down over one year", test: (r) => r.perf?.verdict === "underperformed" || (r.h.return_1y != null && r.h.return_1y < 0) },
   { id: "bold", label: "Very high risk", hint: "Risk estimated at the top of the scale", test: (r) => r.risk === 6 },
 ];
 
@@ -55,8 +62,8 @@ const COLUMNS: { key: SortKey; label: string; numeric?: boolean; title?: string 
   { key: "category", label: "Category" },
   { key: "risk", label: "Risk", title: "Estimated from the AMFI category" },
   { key: "r1y", label: "1Y", numeric: true, title: "Trailing one-year NAV return" },
-  { key: "xirr", label: "Your XIRR", numeric: true, title: "Money-weighted return since your purchase date" },
-  { key: "alpha", label: "vs Nifty 500", numeric: true, title: "Your XIRR minus Nifty 500 over the same dates" },
+  { key: "xirr", label: "Return", numeric: true, title: "Annualized XIRR for money held a year or more, otherwise the plain return since purchase" },
+  { key: "alpha", label: "vs benchmark", numeric: true, title: "Fund return minus its own benchmark over identical dates, in percentage points" },
   { key: "weight", label: "Weight", numeric: true },
   { key: "value", label: "Value", numeric: true },
   { key: "gain", label: "Gain", numeric: true },
@@ -65,8 +72,8 @@ const COLUMNS: { key: SortKey; label: string; numeric?: boolean; title?: string 
 const SORT_OPTIONS: { key: SortKey; label: string; ranked: boolean }[] = [
   { key: "weight", label: "Weight", ranked: true },
   { key: "r1y", label: "1Y return", ranked: true },
-  { key: "xirr", label: "Your XIRR", ranked: true },
-  { key: "alpha", label: "vs Nifty 500", ranked: true },
+  { key: "xirr", label: "Return", ranked: true },
+  { key: "alpha", label: "Vs benchmark", ranked: true },
   { key: "gain", label: "Gain", ranked: true },
   { key: "value", label: "Value", ranked: true },
   { key: "risk", label: "Risk", ranked: true },
@@ -84,7 +91,7 @@ function sortValue(row: Row, key: SortKey): number | string | null {
     case "r1y":
       return row.h.return_1y;
     case "xirr":
-      return row.xirr;
+      return row.ret;
     case "alpha":
       return row.alpha;
     case "weight":
@@ -94,6 +101,15 @@ function sortValue(row: Row, key: SortKey): number | string | null {
     case "gain":
       return row.h.gain_pct;
   }
+}
+
+function TableGlyph() {
+  return (
+    <svg width={15} height={15} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.4} aria-hidden>
+      <rect x="2" y="3" width="12" height="10" rx="1.5" />
+      <path d="M2 7h12M6.5 3v10" />
+    </svg>
+  );
 }
 
 function median(values: number[]): number | null {
@@ -106,6 +122,7 @@ function median(values: number[]): number | null {
 export function FundScreener({
   book,
   analysis,
+  blocked,
   colorOf,
   selected,
   onToggle,
@@ -114,6 +131,7 @@ export function FundScreener({
 }: {
   book: FundPortfolio;
   analysis: FundAnalysis | null;
+  blocked: readonly string[];
   colorOf: (code: number) => string;
   selected: number[];
   onToggle: (code: number) => void;
@@ -128,16 +146,17 @@ export function FundScreener({
   const [risk, setRisk] = useState<RiskFilter>("any");
   const [house, setHouse] = useState("All");
   const [plan, setPlan] = useState<PlanFilter>("all");
+  const [query, setQuery] = useState("");
   const [similar, setSimilar] = useState<number | null>(null);
   const [hot, setHot] = useState<number | null>(null);
   const total = book.totals.value;
 
   const rows = useMemo<Row[]>(() => {
-    const xirrByName = new Map((analysis?.funds ?? []).map((f) => [f.scheme_name, f]));
+    const byCode = new Map((analysis?.funds ?? []).map((f) => [f.scheme_code, f]));
     return book.holdings.map((h) => {
-      const x = xirrByName.get(h.scheme_name);
-      const xirr = x?.xirr ?? null;
-      const bench = x?.benchmark_xirr ?? null;
+      const perf = byCode.get(h.scheme_code);
+      const ret = returnView(perf, blocked);
+      const bench = benchView(perf);
       return {
         h,
         color: colorOf(h.scheme_code),
@@ -146,11 +165,14 @@ export function FundScreener({
         asset: assetClass(h.scheme_category),
         category: categoryShort(h.scheme_category),
         plan: planType(h.scheme_name).plan,
-        xirr,
-        alpha: xirr != null && bench != null ? xirr - bench : null,
+        perf,
+        ret: ret.value,
+        retShort: ret.short,
+        alpha: bench.available ? (perf?.relative_pp ?? null) : null,
+        benchLabel: bench.label,
       };
     });
-  }, [book, analysis, colorOf, total]);
+  }, [book, analysis, blocked, colorOf, total]);
 
   const median1y = useMemo(() => median(rows.map((r) => r.h.return_1y).filter((v): v is number => v != null)), [rows]);
   const classes = useMemo(() => Array.from(new Set(rows.map((r) => r.asset))).sort(), [rows]);
@@ -159,7 +181,9 @@ export function FundScreener({
 
   const presetTest = PRESETS.find((p) => p.id === preset)?.test ?? (() => true);
   const riskTest = RISK_FILTERS.find((f) => f.id === risk)?.test ?? (() => true);
+  const needle = query.trim().toLowerCase();
   const matches = (r: Row) =>
+    (!needle || `${r.h.scheme_name} ${r.h.fund_house} ${r.category} ${r.asset}`.toLowerCase().includes(needle)) &&
     presetTest(r, median1y) && (asset === "All" || r.asset === asset) && riskTest(r.risk) && (house === "All" || r.h.fund_house === house) && (plan === "all" || r.plan === plan);
   const visible = rows.filter(matches).sort((a, b) => {
     const va = sortValue(a, sort.key);
@@ -170,7 +194,7 @@ export function FundScreener({
     const cmp = typeof va === "string" ? va.localeCompare(vb as string) : va - (vb as number);
     return sort.dir === "asc" ? cmp : -cmp;
   });
-  const filtered = preset !== "all" || asset !== "All" || risk !== "any" || house !== "All" || plan !== "all";
+  const filtered = needle !== "" || preset !== "all" || asset !== "All" || risk !== "any" || house !== "All" || plan !== "all";
   const hotRow = rows.find((r) => r.h.scheme_code === hot) ?? null;
   const full = selected.length >= MAX_COMPARE;
 
@@ -180,6 +204,7 @@ export function FundScreener({
     setRisk("any");
     setHouse("All");
     setPlan("all");
+    setQuery("");
   }, []);
   const toggleSimilar = useCallback((code: number) => setSimilar((s) => (s === code ? null : code)), []);
 
@@ -191,32 +216,17 @@ export function FundScreener({
           <p className="mf-basis">Tick up to {MAX_COMPARE} to compare side by side. Star a fund to keep it on your watchlist.</p>
         </div>
         <div className="seg mf-view" role="group" aria-label="Layout">
+          <button type="button" aria-pressed={view === "list"} onClick={() => setFundView("list")}>
+            <RowsIcon size={15} /> List
+          </button>
           <button type="button" aria-pressed={view === "cards"} onClick={() => setFundView("cards")}>
             <GridIcon size={15} /> Cards
           </button>
           <button type="button" aria-pressed={view === "table"} onClick={() => setFundView("table")}>
-            <RowsIcon size={15} /> Table
+            <TableGlyph /> Table
           </button>
         </div>
       </div>
-
-      <div className="alloc funds-book-bar" role="img" aria-label={rows.map((r) => `${r.h.scheme_name} ${r.weight.toFixed(1)}%`).join(", ")} onMouseLeave={() => setHot(null)}>
-        {rows.map((r) => (
-          <span
-            key={r.h.scheme_code}
-            className={r.h.scheme_code === hot ? "on" : ""}
-            style={{ flexGrow: Math.max(r.weight, 0.4), flexBasis: 0, background: r.color }}
-            onMouseEnter={() => setHot(r.h.scheme_code)}
-          >
-            {r.weight >= 14 ? <span>{r.weight.toFixed(0)}%</span> : null}
-          </span>
-        ))}
-      </div>
-      <p className="funds-book-note" aria-hidden="true">
-        {hotRow
-          ? `${hotRow.h.scheme_name} · ${hotRow.weight.toFixed(1)}% · ${rupees(hotRow.h.value)} · 1Y ${signedPoints(hotRow.h.return_1y)}`
-          : "Hover the bar or a fund to call out one sleeve."}
-      </p>
 
       <div className="mf-presets" role="group" aria-label="Quick filters">
         {PRESETS.map((p) => {
@@ -232,6 +242,10 @@ export function FundScreener({
 
       <div className="mf-toolbar">
         <div className="mf-filters">
+          <label className="vz-search">
+            <span className="visually-hidden">Search your funds</span>
+            <input type="search" placeholder="Search funds…" value={query} onChange={(e) => setQuery(e.target.value)} />
+          </label>
           <div className="seg mf-seg" role="group" aria-label="Asset class">
             {["All", ...classes].map((c) => (
               <button key={c} type="button" aria-pressed={asset === c} onClick={() => setAsset(c)}>
@@ -310,6 +324,8 @@ export function FundScreener({
             {preset !== "all" ? `${PRESETS.find((p) => p.id === preset)?.label}: ${PRESETS.find((p) => p.id === preset)?.hint}.` : "Try a wider asset class, risk band or plan."}
           </p>
         </EmptyState>
+      ) : view === "list" ? (
+        <HoldingRows rows={visible} book={book} selected={selected} full={full} onToggle={onToggle} busyCode={busyCode} onRemove={onRemove} similar={similar} toggleSimilar={toggleSimilar} />
       ) : view === "cards" ? (
         <div className="mf-cards" onMouseLeave={() => setHot(null)}>
           {visible.map((r) => {
@@ -321,8 +337,8 @@ export function FundScreener({
                     h={r.h}
                     color={r.color}
                     weight={r.weight}
-                    xirr={r.xirr}
-                    alpha={r.alpha}
+                    perf={r.perf}
+                    blocked={blocked}
                     analysisLoaded={analysis != null}
                     selected={selected.includes(code)}
                     compareFull={full}
@@ -365,8 +381,8 @@ export function FundScreener({
           onRemove={onRemove}
         />
       )}
-      <GapNote gaps={["expense-ratio", "rating", "aum", "nav-history"]}>
-        Expense ratio, rating, AUM and per-fund trend lines are not on the cards yet.
+      <GapNote gaps={["expense-ratio", "rating", "aum"]}>
+        Expense ratio, rating and AUM are not shown yet: the free data source does not publish them.
       </GapNote>
     </section>
   );
@@ -479,11 +495,13 @@ function FundTable({
                   <td data-label="1Y" className={`num ${tone(r.h.return_1y)}`}>
                     {signedPoints(r.h.return_1y, 1)}
                   </td>
-                  <td data-label="Your XIRR" className={`num ${tone(r.xirr)}`}>
-                    {analysisLoaded ? signedPoints(r.xirr, 1) : <span className="skel mf-skel-num" aria-label="Loading" />}
+                  <td data-label="Return" className={`num ${tone(r.ret)}`}>
+                    {analysisLoaded ? signedPoints(r.ret, 1) : <span className="skel mf-skel-num" aria-label="Loading" />}
+                    {analysisLoaded ? <small>{r.retShort}</small> : null}
                   </td>
-                  <td data-label="vs Nifty 500" className={`num ${tone(r.alpha)}`}>
-                    {analysisLoaded ? (r.alpha == null ? "n/a" : signedPoints(r.alpha, 1).replace("%", " pts")) : <span className="skel mf-skel-num" aria-label="Loading" />}
+                  <td data-label="vs benchmark" className={`num ${verdictTone(r.perf?.verdict ?? "unavailable")}`}>
+                    {analysisLoaded ? r.alpha == null ? "n/a" : pts(r.alpha) : <span className="skel mf-skel-num" aria-label="Loading" />}
+                    {analysisLoaded ? <small title={r.perf?.verdict_text}>{r.alpha == null ? "No benchmark" : `${r.benchLabel} · ${VERDICT_LABEL[r.perf?.verdict ?? "unavailable"]}`}</small> : null}
                   </td>
                   <td data-label="Weight" className="num">
                     {r.weight.toFixed(1)}%

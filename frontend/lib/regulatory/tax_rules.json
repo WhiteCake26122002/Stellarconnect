@@ -1,0 +1,137 @@
+{
+  "schemaVersion": 1,
+  "reviewedOn": "2026-10-05",
+  "about": "Capital-gains rules, versioned by financial year. Code asks for taxRules[\"FY2026-27\"]; it never holds a rate itself. A year with no entry is not guessed: the engine either carries the latest configured year forward as a stated assumption or reports that the year is unsupported. frontend/lib/regulatory/tax_rules.json is a byte-for-byte mirror; a test fails if they drift.",
+  "disclaimer": "Tax calculations are estimates for education, not tax advice. Consult a qualified tax professional for your individual tax position.",
+  "sources": [
+    { "id": "equity-rates", "title": "Equity STCG 20% and LTCG 12.5% above Rs 1.25 lakh, for transfers on or after 23 Jul 2024; unchanged for 2026-27", "url": "https://taxguru.in/income-tax/capital-gains-income-tax-act-2025-tax-period-2026-27.html" },
+    { "id": "specified-mf", "title": "Specified mutual fund: more than 65% in debt and money-market instruments, for FY 2025-26 onwards (Finance (No. 2) Act 2024)", "url": "https://www.taxtmi.com/tmi_notes?id=1216" },
+    { "id": "surcharge", "title": "Surcharge on 111A / 112A / 112 gains capped at 15%", "url": "https://cleartax.in/s/marginal-relief-surcharge" }
+  ],
+
+  "supportedFrom": "FY2025-26",
+  "unsupportedYears": {
+    "FY2024-25": "Rates changed on 23 Jul 2024 inside this year (STCG 15% to 20%, LTCG 10% to 12.5%, exemption Rs 1 lakh to Rs 1.25 lakh), so a single set of rates would be wrong for part of it."
+  },
+
+  "surcharge": {
+    "note": "Surcharge depends on total income, which the simulator does not know. It is applied only when you tell it your income band.",
+    "bands": {
+      "up_to_50l": { "label": "Up to Rs 50 lakh", "normalPct": 0, "cappedGainsPct": 0 },
+      "50l_to_1cr": { "label": "Rs 50 lakh to Rs 1 crore", "normalPct": 10, "cappedGainsPct": 10 },
+      "1cr_to_2cr": { "label": "Rs 1 crore to Rs 2 crore", "normalPct": 15, "cappedGainsPct": 15 },
+      "2cr_to_5cr": { "label": "Rs 2 crore to Rs 5 crore", "normalPct": 25, "cappedGainsPct": 15 },
+      "above_5cr": { "label": "Above Rs 5 crore", "normalPctNewRegime": 25, "normalPctOldRegime": 37, "cappedGainsPct": 15 }
+    },
+    "cappedGainsNote": "Equity STCG, equity LTCG and other long-term gains taxed at 12.5% carry a surcharge of at most 15%. Gains taxed at your slab rate carry the full surcharge for your band."
+  },
+
+  "financialYears": {
+    "FY2025-26": {
+      "label": "FY 2025-26",
+      "assessmentYear": "2026-27",
+      "legalBasis": "Income-tax Act, 1961: sections 111A, 112A, 112 and 50AA",
+      "cessPct": 4,
+      "equity": {
+        "stcgRatePct": 20,
+        "ltcgRatePct": 12.5,
+        "ltcgExemption": 125000,
+        "holdingMonths": 12,
+        "sections": { "stcg": "111A", "ltcg": "112A" }
+      },
+      "other": {
+        "holdingMonths": { "listed": 12, "unlisted": 24 },
+        "ltcgRatePct": 12.5,
+        "ltcgExemption": 0,
+        "stcgTaxedAtSlab": true,
+        "sections": { "ltcg": "112" }
+      },
+      "specifiedFund": {
+        "definition": "debt_and_money_market_over_65",
+        "deemedShortTermFrom": "2023-04-01",
+        "section": "50AA"
+      },
+      "grandfathering": { "cutoff": "2018-01-31", "appliesTo": "equity_ltcg", "section": "112A" }
+    },
+    "FY2026-27": {
+      "label": "FY 2026-27",
+      "assessmentYear": "2027-28",
+      "legalBasis": "Income-tax Act, 2025 (in force from 1 Apr 2026), which re-enacts sections 111A, 112A, 112 and 50AA of the 1961 Act at the same rates",
+      "cessPct": 4,
+      "equity": {
+        "stcgRatePct": 20,
+        "ltcgRatePct": 12.5,
+        "ltcgExemption": 125000,
+        "holdingMonths": 12,
+        "sections": { "stcg": "111A", "ltcg": "112A" }
+      },
+      "other": {
+        "holdingMonths": { "listed": 12, "unlisted": 24 },
+        "ltcgRatePct": 12.5,
+        "ltcgExemption": 0,
+        "stcgTaxedAtSlab": true,
+        "sections": { "ltcg": "112" }
+      },
+      "specifiedFund": {
+        "definition": "debt_and_money_market_over_65",
+        "deemedShortTermFrom": "2023-04-01",
+        "section": "50AA"
+      },
+      "grandfathering": { "cutoff": "2018-01-31", "appliesTo": "equity_ltcg", "section": "112A" }
+    }
+  },
+
+  "securityClassification": {
+    "note": "How a listed instrument is classified for tax. Equity shares and equity-oriented ETFs follow the equity rules; other listed ETFs (gold, silver, debt, liquid, international) are taxed under the 'other' rules. Intraday trades and F&O are business income, not capital gains.",
+    "otherEtfKeywords": ["gold", "silver", "liquid", "bond", "gilt", "g-sec", "gsec", "sdl", "debt", "money market", "overnight", "nasdaq", "s&p 500", "international", "global", "overseas"],
+    "businessIncomeProducts": ["intraday"],
+    "businessIncomeAssetClasses": ["future", "option", "index"]
+  },
+
+  "mutualFunds": {
+    "note": "Classification comes from the scheme's AMFI category and name, then any override you set. Categories whose mix depends on the scheme are flagged and lower the confidence of the estimate.",
+    "classes": {
+      "equity": {
+        "label": "Equity-oriented fund",
+        "short": "Equity-oriented",
+        "detail": "At least 65% of assets in domestic equity shares. Taxed under the equity rules."
+      },
+      "specified": {
+        "label": "Specified mutual fund",
+        "short": "Specified fund",
+        "detail": "More than 65% in debt and money-market instruments. Units bought on or after 1 Apr 2023 are taxed as short-term gains at your slab rate whatever the holding period."
+      },
+      "other": {
+        "label": "Other mutual fund",
+        "short": "Other fund",
+        "detail": "Neither equity-oriented nor specified. Gains are short-term at your slab rate within 24 months and 12.5% after, with no indexation and no Rs 1.25 lakh exemption."
+      },
+      "unknown": {
+        "label": "Classification unknown",
+        "short": "Unknown",
+        "detail": "The AMFI category does not settle the tax class. Choose one to see an estimate."
+      }
+    },
+    "holdingMonths": { "equity": 12, "other": 24, "specifiedBeforeCutoff": 24 },
+    "classification": {
+      "rules": [
+        { "id": "commodity", "class": "other", "certainty": "category", "mode": "any", "match": { "nameAny": ["gold", "silver"], "categoryAny": ["gold", "silver", "commodit"] }, "reason": "Gold and silver funds hold neither equity nor debt." },
+        { "id": "overseas-category", "class": "other", "certainty": "category", "match": { "categoryAny": ["overseas", "international"] }, "reason": "An overseas fund-of-funds is not domestic-equity oriented." },
+        { "id": "index-debt", "class": "specified", "certainty": "category", "match": { "categoryAny": ["index fund", "etf"], "nameAny": ["gilt", "bond", "sdl", "g-sec", "gsec", "psu", "liquid", "crisil ibx", "money market", "overnight", "debt"] }, "reason": "This index fund tracks a debt or money-market index." },
+        { "id": "index-international", "class": "other", "certainty": "depends", "match": { "categoryAny": ["index fund", "etf"], "nameAny": ["nasdaq", "s&p 500", "us equity", "international", "global", "world", "overseas", "hang seng", "nyse"] }, "reason": "A name that suggests foreign equity: not domestic-equity oriented." },
+        { "id": "index-equity", "class": "equity", "certainty": "category", "match": { "categoryAny": ["index fund", "etf"] }, "reason": "A domestic equity index fund or ETF." },
+        { "id": "arbitrage", "class": "equity", "certainty": "category", "match": { "categoryAny": ["arbitrage"] }, "reason": "Arbitrage funds hold hedged equity and are taxed as equity-oriented." },
+        { "id": "equity-savings", "class": "equity", "certainty": "depends", "match": { "categoryAny": ["equity savings"] }, "reason": "Equity savings funds usually keep 65% or more in equity and arbitrage, but the scheme decides." },
+        { "id": "balanced-advantage", "class": "equity", "certainty": "depends", "match": { "categoryAny": ["balanced advantage", "dynamic asset allocation"] }, "reason": "Most balanced-advantage funds hedge to stay above 65% equity, but the scheme decides." },
+        { "id": "aggressive-hybrid", "class": "equity", "certainty": "category", "match": { "categoryAny": ["aggressive hybrid"] }, "reason": "Aggressive hybrid funds hold 65% to 80% in equity." },
+        { "id": "multi-asset", "class": "other", "certainty": "depends", "match": { "categoryAny": ["multi asset"] }, "reason": "Multi-asset funds can be above or below 65% equity depending on the scheme." },
+        { "id": "balanced-hybrid", "class": "other", "certainty": "category", "match": { "categoryAny": ["balanced hybrid"] }, "reason": "Balanced hybrid funds hold 40% to 60% equity: below the equity threshold, with debt under 65%." },
+        { "id": "conservative-hybrid", "class": "specified", "certainty": "category", "match": { "categoryAny": ["conservative hybrid"] }, "reason": "Conservative hybrid funds hold 75% to 90% in debt." },
+        { "id": "solution", "class": "unknown", "certainty": "depends", "match": { "categoryAny": ["solution oriented", "retirement", "children"] }, "reason": "Solution-oriented funds vary in mix." },
+        { "id": "fof-domestic", "class": "unknown", "certainty": "depends", "match": { "categoryAny": ["fof domestic", "fund of funds"] }, "reason": "A domestic fund-of-funds takes the class of the funds it holds." },
+        { "id": "equity-scheme", "class": "equity", "certainty": "category", "match": { "categoryAny": ["equity scheme", "elss"] }, "reason": "A diversified or sectoral equity scheme." },
+        { "id": "debt-scheme", "class": "specified", "certainty": "category", "match": { "categoryAny": ["debt scheme", "liquid", "overnight", "money market", "gilt", "corporate bond", "floater"] }, "reason": "A debt scheme: more than 65% in debt and money-market instruments." }
+      ]
+    }
+  }
+}

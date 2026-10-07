@@ -1,0 +1,109 @@
+{
+  "about": "Hand-worked capital-gains cases. The TypeScript engine (frontend/lib/costs/tax.ts) and the Python engine (backend/mutual_funds/tax.py) both run every case and must agree with these numbers, so the two implementations cannot drift apart. Buckets: stcg111A, ltcg112A, stcgSlab, ltcg112. Amounts in rupees; `expect` lists only the fields a case pins down.",
+  "cases": [
+    {
+      "id": "equity-stcg-only",
+      "why": "20% on a short-term equity gain; no profile, so no surcharge or cess.",
+      "fy": "FY2026-27",
+      "items": [{ "id": "a", "bucket": "stcg111A", "gain": 50000 }],
+      "profile": null,
+      "expect": { "supported": true, "taxBeforeSurchargeCess": 10000, "surcharge": 0, "cess": 0, "total": 10000, "includesSurchargeCess": false }
+    },
+    {
+      "id": "ltcg-above-exemption",
+      "why": "12.5% only on the part above Rs 1.25 lakh, never on the whole long-term gain.",
+      "fy": "FY2026-27",
+      "items": [{ "id": "a", "bucket": "ltcg112A", "gain": 300000 }],
+      "profile": null,
+      "expect": { "exemptionApplied": 125000, "exemptionRoom": 0, "taxBeforeSurchargeCess": 21875, "total": 21875 }
+    },
+    {
+      "id": "ltcg-below-exemption",
+      "why": "A long-term gain under the exemption pays nothing and leaves room.",
+      "fy": "FY2026-27",
+      "items": [{ "id": "a", "bucket": "ltcg112A", "gain": 100000 }],
+      "profile": null,
+      "expect": { "exemptionApplied": 100000, "exemptionRoom": 25000, "taxBeforeSurchargeCess": 0, "total": 0 }
+    },
+    {
+      "id": "stcg-plus-ltcg",
+      "why": "The exemption belongs to the long-term gain only; the short-term gain is taxed in full.",
+      "fy": "FY2026-27",
+      "items": [{ "id": "a", "bucket": "stcg111A", "gain": 40000 }, { "id": "b", "bucket": "ltcg112A", "gain": 200000 }],
+      "profile": null,
+      "expect": { "taxBeforeSurchargeCess": 17375, "exemptionApplied": 125000 }
+    },
+    {
+      "id": "surcharge-and-cess-mid-band",
+      "why": "10% surcharge for Rs 50 lakh to 1 crore, then 4% cess on tax plus surcharge.",
+      "fy": "FY2026-27",
+      "items": [{ "id": "a", "bucket": "stcg111A", "gain": 50000 }],
+      "profile": { "slabRatePct": null, "incomeBand": "50l_to_1cr", "regime": "new" },
+      "expect": { "taxBeforeSurchargeCess": 10000, "surcharge": 1000, "cess": 440, "total": 11440, "includesSurchargeCess": true }
+    },
+    {
+      "id": "surcharge-capped-on-equity-gains",
+      "why": "Above Rs 5 crore the surcharge on equity gains stops at 15%.",
+      "fy": "FY2026-27",
+      "items": [{ "id": "a", "bucket": "stcg111A", "gain": 50000 }],
+      "profile": { "slabRatePct": null, "incomeBand": "above_5cr", "regime": "old" },
+      "expect": { "surcharge": 1500, "cess": 460, "total": 11960 }
+    },
+    {
+      "id": "short-term-loss-absorbs-long-term-gain",
+      "why": "A short-term loss is set off against a long-term gain; the remainder fits under the exemption.",
+      "fy": "FY2026-27",
+      "items": [{ "id": "a", "bucket": "stcg111A", "gain": -30000 }, { "id": "b", "bucket": "ltcg112A", "gain": 100000 }],
+      "profile": null,
+      "expect": { "taxBeforeSurchargeCess": 0, "exemptionApplied": 70000, "stcg": 0, "ltcg": 70000 }
+    },
+    {
+      "id": "long-term-loss-cannot-absorb-short-term-gain",
+      "why": "A long-term loss only offsets long-term gains, so the short-term gain is still taxed and the loss is left unabsorbed.",
+      "fy": "FY2026-27",
+      "items": [{ "id": "a", "bucket": "ltcg112A", "gain": -20000 }, { "id": "b", "bucket": "stcg111A", "gain": 50000 }],
+      "profile": null,
+      "expect": { "taxBeforeSurchargeCess": 10000, "unabsorbedLossLong": -20000 }
+    },
+    {
+      "id": "slab-gain-without-slab-rate",
+      "why": "A slab-rate gain is not priced when no slab rate is known; it is reported as not estimated.",
+      "fy": "FY2026-27",
+      "items": [{ "id": "a", "bucket": "stcgSlab", "gain": 100000 }],
+      "profile": null,
+      "expect": { "taxBeforeSurchargeCess": 0, "slabGainNotEstimated": 100000 }
+    },
+    {
+      "id": "slab-gain-with-slab-rate",
+      "why": "The same gain at a 30% slab rate.",
+      "fy": "FY2026-27",
+      "items": [{ "id": "a", "bucket": "stcgSlab", "gain": 100000 }],
+      "profile": { "slabRatePct": 30, "incomeBand": null, "regime": "new" },
+      "expect": { "taxBeforeSurchargeCess": 30000, "slabGainNotEstimated": 0 }
+    },
+    {
+      "id": "other-long-term-no-exemption",
+      "why": "Long-term gains on other assets are 12.5% with no Rs 1.25 lakh exemption.",
+      "fy": "FY2026-27",
+      "items": [{ "id": "a", "bucket": "ltcg112", "gain": 100000 }],
+      "profile": null,
+      "expect": { "taxBeforeSurchargeCess": 12500, "exemptionApplied": 0 }
+    },
+    {
+      "id": "year-with-changed-rates-is-refused",
+      "why": "FY 2024-25 had two sets of rates, so it is not estimated rather than estimated wrongly.",
+      "fy": "FY2024-25",
+      "items": [{ "id": "a", "bucket": "stcg111A", "gain": 50000 }],
+      "profile": null,
+      "expect": { "supported": false, "total": 0 }
+    },
+    {
+      "id": "future-year-carries-rules-forward",
+      "why": "A year with no configured rules uses the latest one and says so.",
+      "fy": "FY2027-28",
+      "items": [{ "id": "a", "bucket": "stcg111A", "gain": 50000 }],
+      "profile": null,
+      "expect": { "supported": true, "taxBeforeSurchargeCess": 10000, "rulesAssumed": true }
+    }
+  ]
+}

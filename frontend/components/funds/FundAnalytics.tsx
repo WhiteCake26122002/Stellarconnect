@@ -6,6 +6,7 @@ import {
   DAY,
   MARKET_DRAWDOWNS,
   maxDrawdown,
+  REQUIREMENTS,
   parseDay,
   riskStats,
   RollingStats,
@@ -35,8 +36,9 @@ export function portfolioSource(holdings: number, analysis: AnalysisState, serie
   if (analysis.error) return { state: "error", message: analysis.error };
   if (!analysis.report) return { state: "loading" };
   if (!analysis.report.ready) return { state: "empty", message: "None of these schemes has a live NAV right now, so there is no value history." };
+  if (analysis.report.blocked?.includes("performance")) return { state: "empty", message: "Withheld: the time-weighted path disagreed with the table beside it, so it is not drawn until that is resolved." };
   if (!series) return { state: "empty", message: "This appears once a holding has at least two weekly marks after its purchase date." };
-  return { state: "ready", set: series, basis: "Time-weighted from" };
+  return { state: "ready", set: series, basis: "Time-weighted (new money is not counted as return) from" };
 }
 
 function benchOf(set: SeriesSet): string | undefined {
@@ -72,7 +74,8 @@ function Basis({ set, basis }: { set: SeriesSet; basis: string }) {
 // ---------------------------------------------------------------------------------------------
 // Risk / return
 
-type MetricRow = { key: string; label: string; hint: string; subject: string; bench: string | null; toneValue?: number | null };
+/** `subject` null means the measure cannot be reported yet; `need` then says what it requires. */
+type MetricRow = { key: string; label: string; hint: string; subject: string | null; need?: string; bench: string | null; toneValue?: number | null };
 
 export function RiskReturnPanel({ source, title = "Risk and return" }: { source: AnalyticsSource; title?: string }) {
   const rfId = useId();
@@ -92,14 +95,14 @@ export function RiskReturnPanel({ source, title = "Risk and return" }: { source:
     d ? (d.depth === 0 ? "No drawdown" : `${signedFrac(d.depth)}`) : "n/a";
   const rows: MetricRow[] = [
     short
-      ? { key: "ret", label: "Return (not annualized)", hint: `Only ${yearsText(s.years)} of marks, too short to annualize honestly.`, subject: signedFrac(s.cumulative), bench: b ? signedFrac(b.cumulative) : null, toneValue: s.cumulative }
+      ? { key: "ret", label: "Return (not annualized)", hint: `Only ${yearsText(s.years)} of marks. ${REQUIREMENTS.annualized}`, subject: signedFrac(s.cumulative), bench: b ? signedFrac(b.cumulative) : null, toneValue: s.cumulative }
       : { key: "ret", label: "Annualized return", hint: "Time-weighted, so the timing of your purchases does not flatter or penalize it.", subject: signedFrac(s.annualized), bench: b ? signedFrac(b.annualized) : null, toneValue: s.annualized },
-    { key: "vol", label: "Volatility", hint: `Annualized standard deviation of returns between marks (about every ${Math.round(set.step / DAY)} days).`, subject: frac(s.volatility), bench: b ? frac(b.volatility) : null },
-    { key: "sharpe", label: "Sharpe ratio", hint: "Return above the risk-free rate per unit of volatility.", subject: ratio(s.sharpe), bench: b ? ratio(b.sharpe) : null },
-    { key: "dd", label: "Max drawdown", hint: s.drawdown && s.drawdown.depth < 0 ? `${longDate(s.drawdown.peak)} → ${longDate(s.drawdown.trough)}, ${s.drawdown.recovered ? `recovered ${longDate(s.drawdown.recovered)}` : "not yet recovered"}.` : "Deepest peak-to-trough fall.", subject: dd(s.drawdown), bench: b ? dd(b.drawdown) : null, toneValue: s.drawdown?.depth ? s.drawdown.depth : null },
-    { key: "beta", label: `Beta vs ${benchName}`, hint: "1.0 moves with the index; below 1 swings less.", subject: ratio(s.beta), bench: benchLabel ? "1.00" : null },
-    { key: "down", label: "Downside capture", hint: `Share of ${benchName}'s falling periods you took. Under 100% is gentler.`, subject: s.downCapture == null ? "n/a" : frac(s.downCapture, 0), bench: null },
-    { key: "up", label: "Upside capture", hint: `Share of ${benchName}'s rising periods you kept.`, subject: s.upCapture == null ? "n/a" : frac(s.upCapture, 0), bench: null },
+    { key: "vol", label: "Volatility", hint: `Annualized standard deviation of returns between marks (about every ${Math.round(set.step / DAY)} days).`, subject: s.volatility == null ? null : frac(s.volatility), need: REQUIREMENTS.volatility, bench: b ? (b.volatility == null ? null : frac(b.volatility)) : null },
+    { key: "sharpe", label: "Sharpe ratio", hint: "Return above the risk-free rate per unit of volatility.", subject: s.sharpe == null ? null : ratio(s.sharpe), need: REQUIREMENTS.sharpe, bench: b ? (b.sharpe == null ? null : ratio(b.sharpe)) : null },
+    { key: "dd", label: "Max drawdown", hint: s.drawdown && s.drawdown.depth < 0 ? `Over ${longDate(set.subject[0].t)} to ${longDate(set.subject[set.subject.length - 1].t)}: ${longDate(s.drawdown.peak)} → ${longDate(s.drawdown.trough)}, ${s.drawdown.recovered ? `recovered ${longDate(s.drawdown.recovered)}` : "not yet recovered"}.` : `Deepest peak-to-trough fall over ${longDate(set.subject[0].t)} to ${longDate(set.subject[set.subject.length - 1].t)}.`, subject: dd(s.drawdown), bench: b ? dd(b.drawdown) : null, toneValue: s.drawdown?.depth ? s.drawdown.depth : null },
+    { key: "beta", label: `Beta vs ${benchName}`, hint: "1.0 moves with the index; below 1 swings less.", subject: s.beta == null ? null : ratio(s.beta), need: REQUIREMENTS.beta, bench: benchLabel ? "1.00" : null },
+    { key: "down", label: "Downside capture", hint: `Share of ${benchName}'s falling periods you took. Under 100% is gentler.`, subject: s.downCapture == null ? null : frac(s.downCapture, 0), need: REQUIREMENTS.capture, bench: null },
+    { key: "up", label: "Upside capture", hint: `Share of ${benchName}'s rising periods you kept.`, subject: s.upCapture == null ? null : frac(s.upCapture, 0), need: REQUIREMENTS.capture, bench: null },
   ];
   const thin = s.volatility == null;
 
@@ -119,7 +122,11 @@ export function RiskReturnPanel({ source, title = "Risk and return" }: { source:
           <small id={`${rfId}-h`}>Your assumption, used for Sharpe</small>
         </label>
       </div>
-      {thin ? <p className="banner warn mf-inline-banner">Volatility, Sharpe and beta need at least 20 marks. They appear as the history grows.</p> : null}
+      {thin ? (
+        <p className="banner mf-inline-banner">
+          Not enough history for volatility, Sharpe, beta or capture ratios: this series covers {yearsText(s.years)} and these measures need at least a year. They appear on their own as history builds.
+        </p>
+      ) : null}
       <div className="table-wrap mf-metrics-wrap">
         <table className="mf-metrics">
           <thead>
@@ -134,16 +141,22 @@ export function RiskReturnPanel({ source, title = "Risk and return" }: { source:
               <tr key={row.key} data-tour={`mf-${row.key}`}>
                 <th scope="row">
                   {row.label}
-                  <small>{row.hint}</small>
+                  <small>{row.subject == null && row.need ? row.need : row.hint}</small>
                 </th>
-                <td className={row.toneValue == null ? "" : row.toneValue > 0 ? "bull" : row.toneValue < 0 ? "bear" : ""}>{row.subject}</td>
+                {row.subject == null ? (
+                  <td className="mf-na" title={row.need}>
+                    Not enough history
+                  </td>
+                ) : (
+                  <td className={row.toneValue == null ? "" : row.toneValue > 0 ? "bull" : row.toneValue < 0 ? "bear" : ""}>{row.subject}</td>
+                )}
                 {b ? <td className="muted">{row.bench ?? "—"}</td> : null}
               </tr>
             ))}
           </tbody>
         </table>
       </div>
-      <GapNote gaps={["category-benchmark", "risk-free"]}>Beta and capture are measured against {benchName}, not the category&apos;s own benchmark.</GapNote>
+      <GapNote gaps={["risk-free"]}>Beta and capture are measured against {benchName}, a broad-market reference, not each fund&apos;s own benchmark.</GapNote>
     </section>
   );
 }
@@ -174,6 +187,15 @@ export function RollingReturnsPanel({ source, title = "Rolling returns" }: { sou
   const present = stats.filter((x) => x.s).map((x) => x.s as RollingStats);
   const lo = Math.min(0, ...present.map((s) => s.min));
   const hi = Math.max(0, ...present.map((s) => s.max));
+  const missing = stats.filter((x) => !x.s).map((x) => `${x.w}Y`);
+
+  if (!present.length) {
+    return (
+      <PanelEmpty title={title}>
+        Rolling returns need at least one full year of history, and this portfolio has {yearsText(history)}. The 1Y, 3Y and 5Y windows appear as each becomes possible.
+      </PanelEmpty>
+    );
+  }
 
   return (
     <section className="card mf-panel" aria-label={title}>
@@ -197,7 +219,7 @@ export function RollingReturnsPanel({ source, title = "Rolling returns" }: { sou
             </tr>
           </thead>
           <tbody>
-            {stats.map(({ w, s }) =>
+            {stats.filter((x) => x.s).map(({ w, s }) =>
               s ? (
                 <tr key={w}>
                   <th scope="row">
@@ -214,18 +236,12 @@ export function RollingReturnsPanel({ source, title = "Rolling returns" }: { sou
                   <td>{frac(s.positiveShare, 0)}</td>
                   <td>{s.beatShare == null ? "n/a" : frac(s.beatShare, 0)}</td>
                 </tr>
-              ) : (
-                <tr key={w} className="mf-row-off">
-                  <th scope="row">{w}Y</th>
-                  <td colSpan={6} className="muted">
-                    Needs more than {w} {w === 1 ? "year" : "years"} of history; this series covers {yearsText(history)}.
-                  </td>
-                </tr>
-              ),
+              ) : null,
             )}
           </tbody>
         </table>
       </div>
+      {missing.length ? <p className="mf-basis">{missing.join(" and ")} windows are not shown: this series covers {yearsText(history)}.</p> : null}
     </section>
   );
 }
@@ -278,7 +294,7 @@ export function GrowthOverlayPanel({ source, title = "Growth of ₹100" }: { sou
         <div>
           <h2>{title}</h2>
           <p className="mf-basis">
-            Each line rebased to 100 at the start of the range.{" "}
+            If ₹100 had been invested at the start of the range. Time-weighted, so money you add later is not counted as return; indices are price indices and exclude dividends.{" "}
             {end ? (
               <>
                 Now: <strong>{set.subjectLabel} {end.s.toFixed(1)}</strong>
@@ -345,12 +361,8 @@ export function GrowthOverlayPanel({ source, title = "Growth of ₹100" }: { sou
             <span>{prettyBench(b.label)}</span>
           </li>
         ))}
-        <li className="mf-legend-off" title="Needs a category-average endpoint">
-          <i />
-          <span>Category average (needs data)</span>
-        </li>
       </ul>
-      <GapNote gaps={["category-average"]}>The category-average line is not drawn.</GapNote>
+      <GapNote gaps={["category-average"]}>No category-average line is drawn, because there is no data behind one.</GapNote>
     </section>
   );
 }

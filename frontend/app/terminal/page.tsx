@@ -2,15 +2,18 @@
 
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
+import { ModuleLoader, useLoaderHold } from "@/components/ModuleLoader";
 import { Terminal } from "@/components/terminal/Terminal";
 import { ApiError, api } from "@/lib/api";
 import "../terminal.css";
 import "../terminal-light.css";
+import "../paper.css";
 
 export default function TerminalPage() {
   const router = useRouter();
   const [user, setUser] = useState<{ id: string; display_name: string } | null>(null);
   const [error, setError] = useState("");
+  const held = useLoaderHold(!!user);
 
   useEffect(() => {
     api
@@ -29,10 +32,10 @@ export default function TerminalPage() {
       </main>
     );
   }
-  if (!user) {
+  if (!user || !held) {
     return (
       <main className="term-root" style={{ placeItems: "center", display: "grid" }} aria-busy="true">
-        <p className="muted">Opening terminal…</p>
+        <ModuleLoader kind="terminal" />
       </main>
     );
   }

@@ -21,7 +21,7 @@ import streamlit as st
 
 import ui_common
 import ui_theme
-from backend.mutual_funds import analysis, nav, recommend, store
+from backend.mutual_funds import analysis, metrics, nav, recommend, store
 
 # Qualitative palette for allocation charts - distinct, readable against the app's dark
 # background, in a fixed order so a given category's color stays consistent chart to chart.
@@ -314,42 +314,61 @@ def _analysis_tab(enriched: list[dict]) -> None:
         return
 
     st.caption(
-        "Money-weighted (XIRR) returns compared against NIFTY 50 and NIFTY 500, plus how your "
+        "Returns compared against NIFTY 50 and NIFTY 500 over the same dates, plus how your "
         "portfolio splits by asset class, market cap and fund house."
     )
 
     today = dt.date.today()
     benchmark_histories = {label: nav.get_index_history(ticker) for label, ticker in nav.BENCHMARK_INDICES.items()}
 
+    invested_total = sum(h["invested"] for h in available)
     portfolio_flows = [(h["purchase_date"], -h["invested"]) for h in available]
     portfolio_flows.append((today, sum(h["value"] for h in available)))
-    portfolio_xirr = analysis.xirr(portfolio_flows)
+    first_buy = min(h["purchase_date"] for h in available)
+    span = (today - first_buy).days
+    # Compounding a short window out to a year turns a -2% fortnight into "-40% a year", so under a
+    # year the plain return over the same dates is shown instead (the rule in metrics.xirr_result).
+    annualized = bool(metrics.xirr_result(portfolio_flows)["annualized"])
+    if annualized:
+        portfolio_xirr = analysis.xirr(portfolio_flows)
+    else:
+        portfolio_xirr = (sum(h["value"] for h in available) / invested_total - 1) * 100 if invested_total else None
 
-    def _benchmark_xirr(history: list[tuple[dt.date, float]]) -> float | None:
+    def _benchmark_return(history: list[tuple[dt.date, float]]) -> float | None:
         total = 0.0
         for h in available:
             bev = analysis.benchmark_equivalent_value(h["invested"], h["purchase_date"], today, history)
             if bev is None:
                 return None
             total += bev
-        flows = [(h["purchase_date"], -h["invested"]) for h in available] + [(today, total)]
-        return analysis.xirr(flows)
+        if annualized:
+            flows = [(h["purchase_date"], -h["invested"]) for h in available] + [(today, total)]
+            return analysis.xirr(flows)
+        return (total / invested_total - 1) * 100 if invested_total else None
 
-    benchmark_returns = {label: _benchmark_xirr(hist) for label, hist in benchmark_histories.items()}
+    benchmark_returns = {label: _benchmark_return(hist) for label, hist in benchmark_histories.items()}
 
-    st.markdown("**Portfolio XIRR vs Benchmarks**")
+    st.markdown("**Portfolio return vs Benchmarks**" if not annualized else "**Portfolio XIRR vs Benchmarks**")
     if portfolio_xirr is None:
-        st.info("Not enough history yet to compute an annualized return (e.g. everything was bought today).")
+        st.info("Not enough history yet to compute a return (e.g. everything was bought today).")
     else:
+        st.caption(
+            f"Annualized (XIRR) over {span} days, from {first_buy:%d %b %Y} to {today:%d %b %Y}."
+            if annualized
+            else f"Held for {span} days (under a year), so these are plain returns over the same dates, "
+            f"{first_buy:%d %b %Y} to {today:%d %b %Y}, not annualized."
+        )
         cols = st.columns(len(nav.BENCHMARK_INDICES) + 1)
         cols[0].metric("Your Portfolio", f"{portfolio_xirr:+.2f}%")
-        for col, (label, bench_xirr) in zip(cols[1:], benchmark_returns.items()):
-            col.metric(label, f"{bench_xirr:+.2f}%" if bench_xirr is not None else "n/a")
+        for col, (label, bench_ret) in zip(cols[1:], benchmark_returns.items()):
+            col.metric(label, f"{bench_ret:+.2f}%" if bench_ret is not None else "n/a")
 
         comparable = {label: r for label, r in benchmark_returns.items() if r is not None}
-        if comparable:
+        if comparable and span >= metrics.MIN_VERDICT_DAYS:
             beaten = [label for label, r in comparable.items() if portfolio_xirr > r]
-            st.caption(f"Outperforming {len(beaten)}/{len(comparable)} benchmarks shown above.")
+            st.caption(f"Ahead of {len(beaten)}/{len(comparable)} benchmarks shown above over these dates.")
+        elif comparable:
+            st.caption(f"Too early to call: only {span} days of data.")
 
     st.write("")
     growth_df = _portfolio_growth_series(available, benchmark_histories)
@@ -367,25 +386,40 @@ def _analysis_tab(enriched: list[dict]) -> None:
     benchmark_history = benchmark_histories.get("NIFTY 500", [])
     fund_rows = []
     for h in available:
-        own = analysis.xirr([(h["purchase_date"], -h["invested"]), (today, h["value"])])
+        held_days = (today - h["purchase_date"]).days
         bev = (
             analysis.benchmark_equivalent_value(h["invested"], h["purchase_date"], today, benchmark_history)
             if benchmark_history else None
         )
-        bench = analysis.xirr([(h["purchase_date"], -h["invested"]), (today, bev)]) if bev is not None else None
-        fund_rows.append({"name": h["scheme_name"], "own": own, "bench": bench})
+        if held_days >= metrics.MIN_ANNUALIZE_DAYS:
+            own = analysis.xirr([(h["purchase_date"], -h["invested"]), (today, h["value"])])
+            bench = analysis.xirr([(h["purchase_date"], -h["invested"]), (today, bev)]) if bev is not None else None
+        else:
+            own = (h["value"] / h["invested"] - 1) * 100 if h["invested"] else None
+            bench = (bev / h["invested"] - 1) * 100 if bev is not None and h["invested"] else None
+        fund_rows.append({"name": h["scheme_name"], "own": own, "bench": bench, "days": held_days})
 
     comparable = [r for r in fund_rows if r["own"] is not None and r["bench"] is not None]
     if comparable:
-        outperforming = [r for r in comparable if r["own"] > r["bench"]]
-        st.caption(f"{len(outperforming)}/{len(comparable)} funds outperforming their NIFTY 500-equivalent period.")
+        judged = [r for r in comparable if r["days"] >= metrics.MIN_VERDICT_DAYS]
+        outperforming = [r for r in judged if r["own"] > r["bench"]]
+        if judged:
+            st.caption(f"{len(outperforming)}/{len(judged)} funds ahead of their NIFTY 500-equivalent over the same dates.")
+        else:
+            st.caption("Too early to call: every fund has been held for under 30 days.")
         for r in comparable:
             with st.container(border=True):
-                label = "outperforming benchmark" if r["own"] > r["bench"] else "trailing benchmark"
+                annual = r["days"] >= metrics.MIN_ANNUALIZE_DAYS
+                if r["days"] < metrics.MIN_VERDICT_DAYS:
+                    label = f"too early to call, {r['days']} days"
+                elif r["own"] > r["bench"]:
+                    label = "ahead of benchmark"
+                else:
+                    label = "behind benchmark"
                 st.markdown(f"**{r['name']}** ({label})")
                 cc1, cc2 = st.columns(2)
-                cc1.metric("Your XIRR", f"{r['own']:+.2f}%")
-                cc2.metric("Benchmark XIRR", f"{r['bench']:+.2f}%")
+                cc1.metric("Your XIRR" if annual else f"Your return, {r['days']} days", f"{r['own']:+.2f}%")
+                cc2.metric("Benchmark XIRR" if annual else "NIFTY 500, same dates", f"{r['bench']:+.2f}%")
     else:
         st.caption("Not enough purchase history yet to compare individual funds against the benchmark.")
 

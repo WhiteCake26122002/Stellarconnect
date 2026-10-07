@@ -6,7 +6,7 @@ import { parseDay } from "@/lib/funds/analytics";
 import { assetClass, categoryRisk, categoryShort, planType, RISK_LABELS } from "@/lib/funds/category";
 import { longDate, rupees, signedPoints, signedRupees } from "@/lib/funds/format";
 import { DATA_GAPS, GapId } from "@/lib/funds/gaps";
-import { holdingTax, taxRule } from "@/lib/funds/tax";
+import type { BenchView, ReturnView } from "@/lib/funds/returns";
 import { DocIcon, ShareIcon } from "./FundIcons";
 
 export type FactSheetData = {
@@ -17,8 +17,11 @@ export type FactSheetData = {
   nav: number | null;
   navDate: string | null;
   holding: FundHolding | null;
-  xirr: number | null;
-  benchXirr: number | null;
+  ret: ReturnView;
+  bench: BenchView;
+  verdict: string;
+  /** How the fund is taxed, from the server's rules; null until loaded. */
+  tax?: { label: string; shortTerm: string; longTerm: string } | null;
 };
 
 const SHEET_GAPS: GapId[] = ["expense-ratio", "aum", "inception", "exit-load", "fund-manager", "holdings", "riskometer"];
@@ -64,8 +67,7 @@ export function FactSheet({ data }: { data: FactSheetData }) {
   const { holding } = data;
   const plan = planType(data.name);
   const risk = categoryRisk(data.category, data.name);
-  const rule = taxRule(data.category, data.name);
-  const tax = holding ? holdingTax({ category: data.category, name: data.name, purchaseDate: holding.purchase_date, gain: holding.gain }) : null;
+  const rule = data.tax;
   const generated = longDate(Date.now());
 
   return (
@@ -104,7 +106,7 @@ export function FactSheet({ data }: { data: FactSheetData }) {
             <tr>
               <th>Tax treatment</th>
               <td>
-                {rule.label}. Short-term: {rule.shortTerm}. Long-term: {rule.longTerm}.
+                {rule ? `${rule.label}. Short-term: ${rule.shortTerm}. Long-term: ${rule.longTerm}. Estimates, not tax advice.` : "See Tax and exit load on the fund page."}
               </td>
             </tr>
           </tbody>
@@ -141,16 +143,16 @@ export function FactSheet({ data }: { data: FactSheetData }) {
                 <td>{signedPoints(holding.return_1y)}</td>
               </tr>
               <tr>
-                <th>Your XIRR / Nifty 500 same dates</th>
+                <th>{data.ret.label} / {data.bench.label ?? "benchmark"}, same dates</th>
                 <td>
-                  {signedPoints(data.xirr)} / {signedPoints(data.benchXirr)}
+                  {signedPoints(data.ret.value)} / {data.bench.available ? signedPoints(data.bench.value) : "unavailable"}
+                  {data.verdict ? ` · ${data.verdict}` : ""}
                 </td>
               </tr>
               <tr>
                 <th>Bought</th>
                 <td>
-                  {longDate(parseDay(holding.purchase_date))}
-                  {tax ? ` · ${tax.term === "slab" ? "slab-rate gains" : tax.term === "long" ? "long-term" : `short-term for ${tax.daysToLong} more days`}` : ""}
+                  {longDate(parseDay(holding.purchase_date))} (first purchase)
                 </td>
               </tr>
             </tbody>

@@ -3,7 +3,7 @@ import { registerAccount } from "./helpers";
 
 test("desk views: chart stays first, heatmap and world map open", async ({ page }) => {
   await registerAccount(page, { first: "Desk", last: "Views" });
-  await page.getByRole("link", { name: "Open paper trading" }).click();
+  await page.getByRole("button", { name: /Paper trading/ }).click();
   await expect(page.getByTestId("terminal")).toBeVisible({ timeout: 30_000 });
   await expect(page.getByRole("navigation", { name: "Desk views" }).getByRole("button", { name: "Chart" })).toHaveAttribute("aria-current", "page");
   await expect(page.getByRole("heading", { name: "NIFTY 50" })).toBeVisible();
@@ -89,6 +89,7 @@ test("desk views: chart stays first, heatmap and world map open", async ({ page 
   await expect(page.getByLabel("Holdings mix").getByRole("button", { name: /Cash/ })).toBeVisible();
 
   await page.getByRole("navigation", { name: "Desk views" }).getByRole("button", { name: "Chart" }).click();
+  await page.getByRole("tab", { name: "Watchlist" }).click();
   await page.locator('.wl-row[data-symbol="RELIANCE"]').click();
   await expect(page.getByRole("heading", { name: "Reliance Industries" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Fetch financials" }).first()).toBeVisible();

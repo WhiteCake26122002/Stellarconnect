@@ -7,7 +7,9 @@ export function inr(n: number, digits = 2) {
 
 export function signedInr(n: number, digits = 2) {
   if (!Number.isFinite(n)) return "—";
-  const sign = n > 0 ? "+" : n < 0 ? "−" : "";
+  // An amount that rounds to nothing carries no sign: "−₹0.00" would claim a loss that is not there.
+  const zero = Number(Math.abs(n).toFixed(digits)) === 0;
+  const sign = zero ? "" : n > 0 ? "+" : "−";
   return `${sign}₹${Math.abs(n).toLocaleString("en-IN", { minimumFractionDigits: digits, maximumFractionDigits: digits })}`;
 }
 
@@ -32,7 +34,8 @@ export function vol(n: number) {
 
 export function pct(n: number, digits = 2) {
   if (!Number.isFinite(n)) return "—";
-  const sign = n > 0 ? "+" : n < 0 ? "−" : "";
+  const zero = Number((Math.abs(n) * 100).toFixed(digits)) === 0;
+  const sign = zero ? "" : n > 0 ? "+" : "−";
   return `${sign}${(Math.abs(n) * 100).toFixed(digits)}%`;
 }
 
@@ -62,10 +65,6 @@ export function indexLevel(n: number) {
   return n.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
-export function rrText(ratio: number) {
-  if (!ratio) return "—";
-  return `1 : ${ratio.toFixed(2)}`;
-}
 
 export function dur(ms: number) {
   const s = Math.max(0, Math.round(ms / 1000));
@@ -73,4 +72,21 @@ export function dur(ms: number) {
   if (s < 3600) return `${Math.floor(s / 60)}m`;
   if (s < 86400) return `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m`;
   return `${Math.floor(s / 86400)}d`;
+}
+
+/** ₹10.6L, ₹4k, ₹1.2Cr: a short money label for chart axes and compact tables. */
+export function compactInr(n: number, signed = false) {
+  if (!Number.isFinite(n)) return "—";
+  const abs = Math.abs(n);
+  const sign = n < 0 ? "−" : signed && n > 0 ? "+" : "";
+  if (abs >= 1e7) return `${sign}₹${(abs / 1e7).toFixed(2).replace(/\.?0+$/, "")}Cr`;
+  if (abs >= 1e5) return `${sign}₹${(abs / 1e5).toFixed(abs >= 1e6 ? 1 : 2).replace(/\.?0+$/, "")}L`;
+  if (abs >= 1e3) return `${sign}₹${(abs / 1e3).toFixed(abs >= 1e4 ? 0 : 1).replace(/\.0$/, "")}k`;
+  return `${sign}₹${abs.toFixed(0)}`;
+}
+
+/** 42.1% from 0.421. */
+export function weightPct(fraction: number, digits = 1) {
+  if (!Number.isFinite(fraction)) return "—";
+  return `${(fraction * 100).toFixed(digits)}%`;
 }

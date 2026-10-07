@@ -115,7 +115,7 @@ export function moveFill(changePct: number) {
 }
 
 export function signedFill(changePct: number) {
-  if (!(Math.abs(changePct) > 0.00005)) return "#2a2418";
+  if (!(Math.abs(changePct) > 0.00005)) return "#212121";
   const mag = Math.min(1, Math.abs(changePct) / 0.025);
   if (changePct > 0) return mix([14, 72, 52], [46, 230, 160], 0.35 + mag * 0.65);
   return mix([92, 22, 32], [240, 113, 120], 0.35 + mag * 0.65);

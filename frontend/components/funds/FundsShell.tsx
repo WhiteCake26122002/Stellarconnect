@@ -5,12 +5,13 @@ import { useRouter } from "next/navigation";
 import { ReactNode, useEffect, useRef, useState } from "react";
 import { AppSwitch } from "@/components/AppSwitch";
 import { ConnectLogo } from "@/components/ConnectLogo";
+import { display } from "@/components/home/cinema/font";
 import { api } from "@/lib/api";
 import { initials } from "@/lib/format";
 
 export function FundsShell({ name, children }: { name: string; children: ReactNode }) {
   return (
-    <div className="desk">
+    <div className={`desk ${display.variable}`}>
       <header className="masthead">
         <Link className="brand-mark" href="/" aria-label="Connect home">
           <ConnectLogo size="md" />

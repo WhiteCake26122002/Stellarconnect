@@ -3,14 +3,14 @@ import { registerAccount, skipFirstRunTour } from "./helpers";
 
 test("register, sample model, verdict, override", async ({ page }) => {
   await registerAccount(page, { first: "E2E", last: "Analyst" });
-  await page.getByRole("link", { name: "Open DCF" }).click();
+  await page.getByRole("button", { name: /Valuation DCF/ }).click();
   await expect(page.getByRole("heading", { name: "Models", exact: true })).toBeVisible();
-  await expect(page.getByRole("link", { name: "Paper trading" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Paper", exact: true })).toBeVisible();
   await page.getByRole("link", { name: "New model" }).click();
   await page.getByRole("button", { name: "Open sample model" }).click();
   await expect(page.getByRole("heading", { name: /Orion Cloud Systems/ })).toBeVisible({ timeout: 30000 });
   await skipFirstRunTour(page);
-  await expect(page.getByText("DCF Base Case")).toBeVisible();
+  await expect(page.getByText("DCF Base Case").first()).toBeVisible();
   await expect(page.getByRole("button", { name: "Refresh statements" })).toHaveCount(0);
   await expect(page.getByRole("img", { name: /Historical vs forecast revenue/i })).toBeVisible();
   await page.getByRole("tab", { name: "Financials" }).click();
@@ -20,10 +20,10 @@ test("register, sample model, verdict, override", async ({ page }) => {
   await expect(book.getByText("FY26")).toBeVisible();
   await expect(book.getByRole("cell", { name: "Revenue" })).toBeVisible();
   await expect(book.getByRole("cell", { name: "520", exact: true })).toBeVisible();
-  await page.getByRole("button", { name: "Balance sheet" }).click();
+  await page.getByRole("button", { name: "Balance sheet", exact: true }).click();
   await expect(page.getByRole("heading", { name: /Balance sheet/ })).toBeVisible();
-  await expect(book.getByRole("cell", { name: "Cash" })).toBeVisible();
-  await page.getByRole("button", { name: "Cash flow" }).click();
+  await expect(book.getByRole("cell", { name: "Cash", exact: true }).first()).toBeVisible();
+  await page.getByRole("button", { name: "Cash flow", exact: true }).click();
   await expect(page.getByRole("heading", { name: /Cash flow/ })).toBeVisible();
   await page.getByRole("tab", { name: "Forecast" }).click();
   await expect(page.getByRole("heading", { name: "FCFF / DCF" })).toBeVisible();

@@ -5,7 +5,9 @@
     "dev": "next dev --port 3000",
     "build": "next build",
     "start": "next start --port 3000",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "test:unit": "node --import ./scripts/register-ts.mjs --test --experimental-test-isolation=none \"lib/**/*.test.ts\"",
+    "sync:regulatory": "node scripts/sync-regulatory.mjs"
   },
   "dependencies": {
     "next": "^15.5.4",

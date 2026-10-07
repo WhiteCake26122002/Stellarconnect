@@ -2,9 +2,10 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api, type MarketHeatmapTile } from "@/lib/api";
-import { compactMoney, pct, px } from "@/lib/trading/format";
+import { pct } from "@/lib/trading/format";
 import { nestedTreemap, signedFill } from "@/lib/trading/treemap";
 import type { Quote } from "@/lib/trading/types";
+import { HeatmapTooltip } from "./paper/HeatmapTooltip";
 
 const UNIVERSES = [
   { id: "Nifty 50", label: "Nifty 50" },
@@ -16,10 +17,13 @@ export function HeatMap({
   quotes,
   loading,
   onPick,
+  compact = false,
 }: {
   quotes: Map<string, Quote>;
   loading?: boolean;
   onPick: (symbol: string) => void;
+  /** The dashboard's embedded version: no page heading, a fixed height. */
+  compact?: boolean;
 }) {
   const wrap = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ w: 800, h: 520 });
@@ -29,6 +33,7 @@ export function HeatMap({
   const [live, setLive] = useState(false);
   const [fetching, setFetching] = useState(false);
   const [hover, setHover] = useState<string | null>(null);
+  // The pointer in window coordinates: the tooltip is drawn in a portal and positioned against the window.
   const [tip, setTip] = useState<{ x: number; y: number } | null>(null);
   const cache = useRef(new Map<string, { tiles: MarketHeatmapTile[]; live: boolean }>());
 
@@ -140,7 +145,8 @@ export function HeatMap({
   const universeLabel = UNIVERSES.find((item) => item.id === universe)?.label || universe;
 
   return (
-    <div className="board-page heat-page">
+    <div className={`board-page heat-page${compact ? " compact" : ""}`}>
+      {compact ? null : (
       <header className="board-head">
         <div>
           <h1>Heat map</h1>
@@ -159,6 +165,7 @@ export function HeatMap({
           <p className="heat-hover muted">{fetching || loading ? "Reading the tape…" : live ? "Yahoo session last" : "Hover a box."}</p>
         )}
       </header>
+      )}
       <div className="heat-toolbar">
         <label>
           Index
@@ -210,21 +217,25 @@ export function HeatMap({
                       role="button"
                       tabIndex={0}
                       aria-label={`${tile.symbol} ${tile.name}`}
+                      aria-describedby={on ? "pt-heat-tip" : undefined}
                       onMouseEnter={(e) => {
-                        const box = wrap.current?.getBoundingClientRect();
                         setHover(tile.symbol);
-                        if (box) setTip({ x: e.clientX - box.left, y: e.clientY - box.top });
+                        setTip({ x: e.clientX, y: e.clientY });
                       }}
-                      onMouseMove={(e) => {
-                        const box = wrap.current?.getBoundingClientRect();
-                        if (box) setTip({ x: e.clientX - box.left, y: e.clientY - box.top });
-                      }}
+                      onMouseMove={(e) => setTip({ x: e.clientX, y: e.clientY })}
                       onMouseLeave={() => {
                         setHover((h) => (h === tile.symbol ? null : h));
                         setTip(null);
                       }}
-                      onFocus={() => setHover(tile.symbol)}
-                      onBlur={() => setHover((h) => (h === tile.symbol ? null : h))}
+                      onFocus={(e) => {
+                        setHover(tile.symbol);
+                        const r = e.currentTarget.getBoundingClientRect();
+                        setTip({ x: r.left + r.width / 2, y: r.top + r.height / 2 });
+                      }}
+                      onBlur={() => {
+                        setHover((h) => (h === tile.symbol ? null : h));
+                        setTip(null);
+                      }}
                       onClick={() => onPick(tile.symbol)}
                       onKeyDown={(e) => {
                         if (e.key === "Enter" || e.key === " ") {
@@ -252,15 +263,19 @@ export function HeatMap({
           ))}
         </svg>
         {tip && hovered ? (
-          <div className="heat-tip" style={{ left: tip.x + 12, top: tip.y + 12 }} role="tooltip">
-            <strong>{hovered.symbol}</strong>
-            <span>{hovered.name}</span>
-            <b className={hovered.change_pct >= 0 ? "up" : "down"}>{pct(hovered.change_pct)}</b>
-            <em>
-              {px(hovered.last)}
-              {hovered.market_cap > 0 ? ` · ${compactMoney(hovered.market_cap)}` : ""}
-            </em>
-          </div>
+          <HeatmapTooltip
+            anchor={tip}
+            data={{
+              symbol: hovered.symbol,
+              name: hovered.name,
+              last: hovered.last,
+              changePct: hovered.change_pct,
+              sector: hovered.industry,
+              dayChange: hovered.last > 0 ? hovered.last - hovered.last / (1 + hovered.change_pct) : undefined,
+              volume: quotes.get(hovered.symbol)?.volume || undefined,
+              marketCap: hovered.market_cap > 0 ? hovered.market_cap : undefined,
+            }}
+          />
         ) : null}
         {!fetching && !source.length ? (
           <p className="heat-empty" role="status">

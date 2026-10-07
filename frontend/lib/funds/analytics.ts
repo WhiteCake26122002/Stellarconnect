@@ -7,9 +7,21 @@ import type { FundAnalysis } from "@/lib/api";
 export const DAY = 86_400_000;
 export const YEAR = 365.25 * DAY;
 
-/** Fewest usable intervals before volatility, beta or Sharpe are reported. */
-const MIN_INTERVALS = 20;
+/**
+ * Fewest weekly observations before volatility, beta, Sharpe or the capture ratios are reported:
+ * 52 is one year of weekly marks, the least that gives an annualised figure real meaning.
+ */
+export const MIN_INTERVALS = 52;
 const MIN_CAPTURE_INTERVALS = 4;
+
+/** What each risk measure needs, in words the panel can show instead of a bare "n/a". */
+export const REQUIREMENTS = {
+  annualized: "Annualizing needs at least one year of history; a shorter window would only extrapolate noise.",
+  volatility: "Annualized volatility needs at least one year of observations (about 52 weekly marks).",
+  sharpe: "Sharpe needs an annualized return and volatility, so at least one year of history, plus a risk-free rate.",
+  beta: "Beta needs at least one year of overlapping weekly returns with the benchmark.",
+  capture: "Capture ratios need a year of overlapping returns, with at least four rising and four falling benchmark periods.",
+} as const;
 
 export type Point = { t: number; v: number };
 
@@ -104,15 +116,13 @@ export function parseDay(iso: string): number {
 }
 
 /**
- * The analysis endpoint's weekly marks, chain-linked into a time-weighted index. A week in which a
- * holding was bought is dropped: its jump is new money, not performance.
+ * The analysis endpoint's time-weighted index (100 at the first purchase). The server has already
+ * removed new money from it, so every interval's return is performance and none needs excluding.
  */
-export function seriesFromGrowth(growth: FundAnalysis["growth"], purchaseDates: string[]): SeriesSet | null {
-  const buys = purchaseDates.map(parseDay).filter(Number.isFinite);
+export function seriesFromPerformance(performance: FundAnalysis["performance"]): SeriesSet | null {
   return buildSeriesSet(
-    growth.map((p) => ({ t: parseDay(p.date), subject: p.portfolio, bench: p.benchmarks })),
+    performance.map((p) => ({ t: parseDay(p.date), subject: p.portfolio, bench: p.benchmarks })),
     "Your portfolio",
-    (t0, t1) => buys.some((b) => b > t0 && b <= t1),
   );
 }
 
@@ -195,10 +205,14 @@ export function riskStats(set: SeriesSet, pick: Pick, points: Point[], riskFree:
       const varB = pairs.reduce((a, [, b]) => a + (b - mb) ** 2, 0);
       beta = varB > 0 ? cov / varB : null;
     }
-    const down = pairs.filter((p) => p[1] < 0);
-    const up = pairs.filter((p) => p[1] > 0);
-    if (down.length >= MIN_CAPTURE_INTERVALS) downCapture = mean(down.map((p) => p[0])) / mean(down.map((p) => p[1]));
-    if (up.length >= MIN_CAPTURE_INTERVALS) upCapture = mean(up.map((p) => p[0])) / mean(up.map((p) => p[1]));
+    // Capture ratios are averages over the benchmark's up and down periods, so they need the same
+    // year of overlapping observations as beta, plus enough of each kind of period to average.
+    if (pairs.length >= MIN_INTERVALS) {
+      const down = pairs.filter((p) => p[1] < 0);
+      const up = pairs.filter((p) => p[1] > 0);
+      if (down.length >= MIN_CAPTURE_INTERVALS) downCapture = mean(down.map((p) => p[0])) / mean(down.map((p) => p[1]));
+      if (up.length >= MIN_CAPTURE_INTERVALS) upCapture = mean(up.map((p) => p[0])) / mean(up.map((p) => p[1]));
+    }
   }
   return {
     years,
