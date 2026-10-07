@@ -31,10 +31,20 @@ class Settings(BaseModel):
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
 
 
+def normalize_database_url(url: str) -> str:
+    """Hosted Postgres (Neon, Render, Heroku) hands out postgres:// or postgresql:// URLs; this app ships the psycopg 3
+    driver, so name it explicitly. SQLite and URLs that already name a driver pass through unchanged."""
+    url = url.strip()
+    for prefix in ("postgres://", "postgresql://"):
+        if url.startswith(prefix):
+            return "postgresql+psycopg://" + url[len(prefix):]
+    return url
+
+
 @lru_cache
 def get_settings() -> Settings:
     return Settings(
-        database_url=os.environ.get("DATABASE_URL", Settings().database_url),
+        database_url=normalize_database_url(os.environ.get("DATABASE_URL", Settings().database_url)),
         session_secret=os.environ.get("SESSION_SECRET", Settings().session_secret),
         session_cookie=os.environ.get("SESSION_COOKIE", Settings().session_cookie),
         session_days=int(os.environ.get("SESSION_DAYS", "14")),

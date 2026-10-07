@@ -23,6 +23,10 @@ The terminal pulls Yahoo Finance OHLC and last prices (the same feed as the DCF 
 
 SQLite is the default API database (`backend/data/app.db`). For Postgres, set `DATABASE_URL` (see `.env.example`).
 
+## Putting it online
+
+See [DEPLOY.md](DEPLOY.md): the website on Vercel, the API on Render, the database on Neon, all redeploying from `main`.
+
 ## Tests
 
 ```bash

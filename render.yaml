@@ -1,0 +1,22 @@
+# Render Blueprint: the Connect API (FastAPI). The website itself is the Next.js app in frontend/, deployed on Vercel.
+# Render redeploys this service whenever the repository's main branch changes.
+services:
+  - type: web
+    name: connect-api
+    runtime: docker
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: .
+    plan: free
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: PORT
+        value: "8000"
+      - key: DATABASE_URL # a Postgres connection string, e.g. from Neon (see DEPLOY.md)
+        sync: false
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: COOKIE_SECURE
+        value: "true"
+      - key: CORS_ORIGINS # the Vercel site's address, e.g. https://stellarconnect.vercel.app
+        sync: false
